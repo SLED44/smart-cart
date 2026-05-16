@@ -1,0 +1,29 @@
+# Secrets — never commit
+.env
+.streamlit/secrets.toml
+
+# Legacy local data (replaced by Supabase KV — kept locally as one-off backups)
+data/
+legacy_snapshot.json
+smartcart_backup_*.json
+
+# Kroger app credentials export
+App Registration Details*.pdf
+
+# Python cruft
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Virtual environments
+.venv/
+venv/
+env/

@@ -1,0 +1,14 @@
+# SmartCart — Python Dependencies
+# Install with: pip3 install -r requirements.txt
+
+# Streamlit — the entire UI layer
+streamlit>=1.35.0
+
+# HTTP requests — Kroger, Anthropic, and Supabase REST calls
+requests>=2.31.0
+
+# Anthropic Python SDK — Claude API (list parsing, product matching)
+anthropic>=0.40.0
+
+# Environment variable loading from .env file
+python-dotenv>=1.0.0
