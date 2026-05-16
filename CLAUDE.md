@@ -61,6 +61,9 @@ Rough priority order. Pick from the top.
 4. **Tighter review-queue vertical rhythm** — too much whitespace between alt cards. Drop padding in `.product-card` CSS.
 5. **Empty/loading states** — most screens show "" or a spinner. Add skeletons for the parse → match transition so the user sees what's about to happen.
 
+### Design-system cleanup (DRY the colors)
+**Status**: shipped working but inefficient. Every `sc_design.py` helper repeats oklch literals inline because Streamlit's DOM doesn't inherit `:root` CSS vars (silent fallback → unstyled). Fix: scope the var definitions to a selector Streamlit's DOM does inherit from (`.stApp` or `[data-testid="stAppViewContainer"]`) in `style.css`, then replace the literal colors in `sc_design.py` with `var(--sc-*)` references and the `PALETTE` dict. Test thoroughly on the live app since this is the third time we've hit a Streamlit CSS quirk.
+
 ### Quick wins (≤30 min each)
 6. **Auto-detect expired Kroger refresh token on home screen** and surface the Connect Kroger banner proactively rather than mid-match.
 7. **Edit-a-preference UI** — `preference_store.update_preference_upc()` exists but no screen uses it. Add an "Edit" button next to Delete on the Preferences screen.

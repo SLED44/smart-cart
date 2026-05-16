@@ -1,0 +1,19 @@
+# SmartCart Streamlit theme config.
+# Drop this at .streamlit/config.toml in the smart-cart repo.
+#
+# Streamlit only accepts hex (no oklch), so these are sRGB approximations of
+# the design tokens in colors_and_type.css. The css inside main.py picks up
+# the full pastel palette via the var(--sc-...) definitions.
+
+[theme]
+# Bright produce-green from the design system (≈ --sc-green-600).
+primaryColor = "#3aa86b"
+# Canvas + soft surface.
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f8f9fa"
+# Body text.
+textColor = "#212529"
+# Type stack — Streamlit ships Source Sans Pro 3 as its default, which is
+# what the design system targets. Leaving this commented is intentional;
+# uncomment if Streamlit ever changes their default.
+# font = "sans serif"

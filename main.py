@@ -135,64 +135,29 @@ def _go(screen: str):
     st.rerun()
 
 # ---------------------------------------------------------------------------
-# Minimal CSS — utilitarian only
+# Design-system CSS — full palette + primitives loaded from style.css.
+# Edit style.css to change visual design; this loader stays as-is.
 # ---------------------------------------------------------------------------
 
-st.markdown("""
-<style>
-    .match-badge {
-        display: inline-block;
-        padding: 2px 10px;
-        border-radius: 12px;
-        font-size: 0.78em;
-        font-weight: 600;
-        margin-bottom: 6px;
-    }
-    .badge-preferred    { background:#d4edda; color:#155724; }
-    .badge-oos          { background:#f8d7da; color:#721c24; }
-    .badge-best         { background:#d1ecf1; color:#0c5460; }
-    .badge-needs-pick   { background:#fff3cd; color:#856404; }
-    .badge-not-found    { background:#e2e3e5; color:#383d41; }
-    .badge-sale         { background:#fff3cd; color:#856404; }
-    .sale-banner {
-        background:#fff3cd; border:1px solid #ffc107;
-        border-radius:6px; padding:8px 12px; margin:8px 0;
-        font-size:0.9em;
-    }
-    .oos-banner {
-        background:#f8d7da; border:1px solid #f5c6cb;
-        border-radius:6px; padding:8px 12px; margin:8px 0;
-        font-size:0.9em;
-    }
-    .product-card {
-        border:1px solid #dee2e6; border-radius:8px;
-        padding:16px; margin-bottom:8px;
-        background:#ffffff;
-    }
-    .footer-bar {
-        position:fixed; bottom:0; left:0; right:0;
-        background:#f8f9fa; border-top:1px solid #dee2e6;
-        padding:8px 24px; font-size:0.85em; color:#6c757d;
-    }
-</style>
-""", unsafe_allow_html=True)
+with open("style.css") as _css:
+    # The HTML parser closes <style> at the first literal </style> it sees,
+    # even inside a CSS /* */ comment. style.css's leading USAGE comment
+    # contains a literal </style>, which prematurely terminates the tag and
+    # dumps the rest of the file to the page as text. Escape it so the HTML
+    # parser doesn't see a close tag (CSS parser, inside a comment, ignores).
+    _css_text = _css.read().replace("</style>", "<\\/style>")
+    st.html(f"<style>{_css_text}</style>")
 
-# ---------------------------------------------------------------------------
-# Badge helper
-# ---------------------------------------------------------------------------
+from sc_design import (  # noqa: E402
+    match_badge,
+    product_card,
+    savings_card,
+    stat_card,
+)
 
-_BADGE_CLASSES = {
-    "Preferred Match":  "badge-preferred",
-    "Preferred OOS":    "badge-oos",
-    "Best Match":       "badge-best",
-    "Needs Your Pick":  "badge-needs-pick",
-    "Not Found":        "badge-not-found",
-    "On Sale Alt":      "badge-sale",
-}
-
-def _badge(match_type: str) -> str:
-    cls = _BADGE_CLASSES.get(match_type, "badge-best")
-    return f'<span class="match-badge {cls}">{match_type}</span>'
+# Badge rendering moved to sc_design.match_badge (imported above).
+# Keep `_badge` as a thin alias so existing call sites don't need editing.
+_badge = match_badge
 
 # ---------------------------------------------------------------------------
 # Screen: Login
@@ -261,13 +226,31 @@ def screen_home():
     # Stats
     summary = preference_store.data_summary()
     col_a, col_b, col_c = st.columns(3)
-    col_a.metric("Saved Preferences", summary["preference_count"])
-    col_b.metric("Staples on File", summary["staple_count"])
-    col_c.metric("Sessions Run", summary["session_count"])
+    with col_a:
+        st.html(stat_card(
+            tone="green", glyph="★",
+            label="Saved preferences",
+            value=summary["preference_count"],
+            sub="brands you trust",
+        ))
+    with col_b:
+        st.html(stat_card(
+            tone="grape", glyph="📌",
+            label="Staples on file",
+            value=summary["staple_count"],
+            sub="auto-included",
+        ))
+    with col_c:
+        st.html(stat_card(
+            tone="sky", glyph="🛒",
+            label="Runs this year",
+            value=summary["session_count"],
+            sub="≈ once a week",
+        ))
 
     st.divider()
-    st.subheader("Paste Your Grocery List")
-    st.caption("Any format works — bullet list, numbered, prose, categorised sections, or mixed.")
+    st.subheader("What are we cooking this week? 🍳")
+    st.caption("Paste your list — bullets, prose, categorised, mixed. We'll figure it out.")
 
     raw_list = st.text_area(
         "Grocery list",
@@ -335,7 +318,7 @@ def screen_home():
             add_staples = st.session_state.staples_added
 
     st.divider()
-    if st.button("Parse List →", type="primary", use_container_width=True):
+    if st.button("Sort This Out For Me →", type="primary", use_container_width=True):
         if not raw_list.strip() and not (add_staples and summary["staple_count"] > 0):
             st.error("Please paste a grocery list or add staples before continuing.")
             return
@@ -466,8 +449,8 @@ def screen_item_filter():
         _go("home")
         return
 
-    st.title("What do you need this run?")
-    st.caption("Uncheck anything you already have at home. Only checked items will be matched and added to your cart.")
+    st.title("Anything we don't need this run?")
+    st.caption("Already got it at home? Uncheck it. We'll only grab what you're missing.")
     st.divider()
 
     # Surface any parse warnings here since we skipped the preview screen
@@ -531,7 +514,7 @@ def screen_item_filter():
         if st.button("← Back", use_container_width=True):
             _go("home")
     with col_continue:
-        btn_label = f"Continue with {checked_count} item{'s' if checked_count != 1 else ''} →"
+        btn_label = f"Hunt Down {checked_count} Item{'s' if checked_count != 1 else ''} →"
         if st.button(btn_label, type="primary", use_container_width=True, disabled=checked_count == 0):
             # Filter combined_items down to only checked items
             st.session_state.combined_items = [
@@ -549,7 +532,7 @@ def _run_matching_pipeline():
     items = st.session_state.combined_items
 
     # Sale scan (runs in background — best effort)
-    with st.spinner("Scanning for sale alternatives..."):
+    with st.spinner("🏷 Scoping for deals…"):
         try:
             scan_result = sale_scanner.scan_for_sale_alternatives(items)
             st.session_state.scan_result = scan_result
@@ -561,7 +544,7 @@ def _run_matching_pipeline():
             st.warning(f"Sale scan skipped: {e}")
 
     # Product matching
-    with st.spinner(f"Matching {len(items)} items against Kroger catalog..."):
+    with st.spinner(f"🔎 Hunting down {len(items)} items… 5 workers searching the Kroger catalog in parallel."):
         try:
             matched = product_matcher.match_items(items)
             st.session_state.matched_items = matched
@@ -597,46 +580,24 @@ def screen_sale_scan():
     scan = st.session_state.scan_result
     alerts = scan.get("sale_alerts", [])
 
-    st.title("🏷 Sale Scan")
-    st.write(
-        f"We found **{len(alerts)} item(s)** on sale that are comparable "
-        f"to your preferred products."
-    )
+    st.title("🏷 We snagged a deal.")
     st.divider()
 
     switches = list(st.session_state.sale_switches)
 
     for alert in alerts:
-        item_name  = alert["item_name"]
-        preferred  = alert["preferred_product"]
-        sale_prod  = alert["sale_product"]
-        savings    = alert["savings_amount"]
-        savings_pct= alert["savings_pct"]
         item_key   = alert["item_key"]
+        item_name  = alert["item_name"]
+        sale_prod  = alert["sale_product"]
+        sale_price = sale_prod.get("promo_price") or sale_prod.get("price")
 
-        st.subheader(item_name)
-        col_pref, col_sale = st.columns(2)
-
-        with col_pref:
-            st.markdown("**Your Usual**")
-            pref_price = preferred.get("price")
-            price_str  = f"${pref_price:.2f}" if pref_price else "Price unknown"
-            st.write(f"**{preferred.get('brand','')}** {preferred.get('product_name','')}")
-            st.write(f"{preferred.get('size','')} · {price_str}")
-
-        with col_sale:
-            st.markdown("**🏷 On Sale This Week**")
-            sale_price = sale_prod.get("promo_price") or sale_prod.get("price")
-            sale_str   = f"${sale_price:.2f}" if sale_price else "Price unknown"
-            st.write(f"**{sale_prod.get('brand','')}** {sale_prod.get('product_name','')}")
-            st.write(f"{sale_prod.get('size','')} · {sale_str}")
-            st.write(f"💰 Save **${savings:.2f}** ({savings_pct:.1f}% less)")
+        st.html(savings_card(alert))
 
         is_switched = item_key in switches
         col_a, col_b = st.columns(2)
         with col_a:
             if st.button(
-                f"{'✓ Switched for this run' if is_switched else 'Switch to sale item (this run)'}",
+                "✓ Snagged for this run" if is_switched else "Snag the Deal",
                 key=f"switch_{item_key}",
                 type="primary" if not is_switched else "secondary",
             ):
@@ -647,8 +608,7 @@ def screen_sale_scan():
                 st.session_state.sale_switches = switches
                 st.rerun()
         with col_b:
-            if st.button(f"Always prefer sale item", key=f"perm_{item_key}"):
-                # Save as new permanent preference
+            if st.button("Always grab the sale one", key=f"perm_{item_key}"):
                 preference_store.save_preference(
                     item_key,
                     {
@@ -766,7 +726,7 @@ def screen_review():
     current_mt = st.session_state.get(f"current_mt_{idx}", match_type)
 
     st.subheader(item_name)
-    st.markdown(_badge(current_mt), unsafe_allow_html=True)
+    st.html(_badge(current_mt))
 
     # Show original requested quantity for butcher/weight items
     item_notes = item.get("notes", "")
@@ -926,44 +886,13 @@ def screen_review():
 
 
 def _render_product_card(product: dict, is_primary: bool = False, item: dict = None):
-    """Render a product detail card."""
-    brand    = product.get("brand", "")
-    name     = product.get("product_name", "")
-    size     = product.get("size", "")
-    price    = product.get("price")
-    promo    = product.get("promo_price")
-    on_sale  = product.get("on_sale", False)
-    in_stock = product.get("in_stock", True)
-    oos_flag = product.get("_oos_preferred", False)
+    """Render the primary product as a design-system card (image + price + OOS + UPC)."""
+    st.html(product_card(product))
 
-    col_img, col_info = st.columns([1, 4])
-    with col_img:
-        image_url = product.get("image_url")
-        if image_url:
-            st.image(image_url, width=80)
-        else:
-            st.write("📦")
-
-    with col_info:
-        st.write(f"**{brand} {name}**")
-        st.write(f"{size}")
-
-        if oos_flag:
-            st.markdown("🚫 *Out of Stock*", unsafe_allow_html=False)
-        elif not in_stock:
-            st.markdown("🚫 *Out of Stock*", unsafe_allow_html=False)
-
-        if on_sale and promo:
-            st.write(f"~~${price:.2f}~~ **${promo:.2f}** 🏷 On Sale")
-        elif price:
-            st.write(f"${price:.2f}")
-        else:
-            st.write("Price unavailable")
-
-        # Cost per oz
-        cpp = product_matcher.cost_per_oz(product)
-        if cpp:
-            st.caption(f"${cpp:.3f} / oz")
+    # Cost-per-oz isn't in the design-system card primitive — render below.
+    cpp = product_matcher.cost_per_oz(product)
+    if cpp:
+        st.caption(f"${cpp:.3f} / oz")
 
 
 def _render_alt_card(alt: dict, alt_index: int, review_index: int, item: dict):
@@ -1121,7 +1050,8 @@ def screen_summary():
         _go("home")
         return
 
-    st.title("✅ Shopping Run Complete")
+    st.title("✅ Your cart's loaded.")
+    st.caption("Take it from here, City Market.")
     st.divider()
 
     auto_confirmed = st.session_state.auto_confirmed_items
