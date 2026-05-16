@@ -26,6 +26,9 @@ Single-user Streamlit app that turns a freeform grocery list into a Kroger (City
 | `product_matcher.py` | Per-item Kroger search + Claude best-match. Parallel: `ThreadPoolExecutor(5)`. |
 | `sale_scanner.py` | Pre-review pass for on-sale alternatives to preferred items. Parallel: 5 workers. |
 | `cart_manager.py` | Posts confirmed items to Kroger cart. |
+| `sc_design.py` | Design-system helpers — return HTML strings for stat tiles, savings hero, product cards, badges. Render with `st.html()`, NOT `st.markdown()`. |
+| `style.css` | Full design-system CSS. Loaded once at startup. See Design-system notes below. |
+| `.streamlit/config.toml` | Streamlit native-widget theme (primary green for buttons, sliders). |
 
 ## How to update
 1. Edit files locally.
@@ -45,6 +48,20 @@ Single-user Streamlit app that turns a freeform grocery list into a Kroger (City
 ### Touching the database
 Schema lives in the Supabase dashboard. Single `kv` table is all we need; if you add another table, do it through a SQL migration in the dashboard and document it here.
 
+### Design system
+The visual layer was built from a Claude Design hand-off (May 2026). Architecture:
+
+- **`style.css`** holds the full token system: `:root` palette (oklch), type scale, spacing tokens, and all `.sc-*` class definitions (`.sc-stat-card`, `.sc-savings-card`, `.sc-match-row`, etc.).
+- **`sc_design.py`** contains Python functions that return HTML strings for each visual primitive. Call from any screen with `st.html(stat_card(...))`.
+- **`.streamlit/config.toml`** sets Streamlit's native widget theme so buttons/sliders/checkboxes match the design-system green.
+
+**Critical rendering rules** (learned the hard way):
+1. **Use `st.html()`, not `st.markdown()`** for any HTML primitive. `st.markdown` runs the content through a markdown parser that mangles `*` characters in CSS comments and inserts unexpected tags.
+2. **Escape `</style>` in the CSS file content** before injecting. The HTML parser closes `<style>` at the first literal `</style>` it sees — even inside a CSS `/* */` comment. `main.py` does this with `.replace("</style>", "<\\/style>")`.
+3. **Don't rely on `:root` CSS variables in helpers.** Streamlit's DOM tree breaks variable inheritance somewhere. The `sc_design.py` helpers currently use **literal `oklch()` and hex colors inline** — DRY'd through the `PALETTE` dict at the top of the file. Color tweaks happen there.
+
+To add a new visual primitive: write the helper in `sc_design.py` using `PALETTE` colors inline, render with `st.html(my_helper(...))`. Use class names only if you've verified that specific selector works inside Streamlit's DOM.
+
 ### Rotating credentials
 - **Anthropic key**: console.anthropic.com → keys → revoke + replace → update `.env` + Streamlit secrets
 - **Kroger client secret**: developer.kroger.com → app → regenerate → same two places
@@ -54,12 +71,24 @@ Schema lives in the Supabase dashboard. Single `kv` table is all we need; if you
 ## Enhancement backlog
 Rough priority order. Pick from the top.
 
-### Out-of-the-gate polish
-1. **Product images on review cards** — Kroger API returns `image_url`; product cards in `main.py:_render_product_card` ignore it. Adding `st.image(product['image_url'], width=120)` would change the entire feel.
-2. **Mobile layout** — Streamlit's default columns crush awkwardly on a phone. The review queue (one card at a time) is fine; the home screen's metric cards and the Sale Scan two-column compare break. Need `st.container` + conditional column ratios or wider single-column on narrow viewports.
-3. **Match badge restyle** — current colored boxes look like 2018 Bootstrap. Use Streamlit's native `st.badge` (added ~1.40) or replace the CSS with a flatter, larger pill style.
-4. **Tighter review-queue vertical rhythm** — too much whitespace between alt cards. Drop padding in `.product-card` CSS.
-5. **Empty/loading states** — most screens show "" or a spinner. Add skeletons for the parse → match transition so the user sees what's about to happen.
+### Shipped in May 2026 design refresh
+- ✅ Product images on review cards (`sc_design.product_card`, 140px)
+- ✅ Match badge restyle (pastel pills, palette in `sc_design.py`)
+- ✅ Voice copy across home / item filter / matching spinner / sale scan / summary
+- ✅ Pastel stat tiles on home screen (replaces `st.metric`)
+- ✅ Sale-scan savings hero card
+- ✅ Streamlit native widget theme (`.streamlit/config.toml`)
+
+### Carried over from Claude Design hand-off (NOT shipped)
+1. **Matching screen progress UI** — currently a basic spinner. Mocks in the design hand-off show a step-by-step grid of `matching_row` rendering as items resolve. Requires threading callback in `product_matcher.match_items` so the UI can render mid-flight. Helpers `matching_row` and `progress_section` are already in `sc_design.py` waiting to be wired.
+2. **Preferences screen redesign** — Claude Design has richer mocks: per-row product cards, drag handles, qty steppers, search bar with inline edit. Current screen is functional but plain.
+3. **Staples screen redesign** — same situation, mocks exist for category grouping + drag-to-reorder.
+4. **Tablet/mobile pass** — `style.css` has a `@media (max-width: 760px)` block but Streamlit's container chrome (sidebar toggle, top bar) overlays it. Needs `st.set_page_config(layout="centered")` plus tighter padding overrides.
+5. **Step pills in header bar** — the mockup shows a 6-step progress indicator (Paste → Trim → Match → Deals → Review → Done) across the top of every screen. Not implemented.
+
+### Out-of-the-gate polish (still relevant)
+1. **Empty/loading states** — most screens show "" or a spinner. Add skeletons for the parse → match transition so the user sees what's about to happen.
+2. **Tighter review-queue vertical rhythm** — too much whitespace between primary card and alt cards. Drop padding in product card / inline section margins.
 
 ### Design-system cleanup (DRY the colors)
 **Status**: shipped working but inefficient. Every `sc_design.py` helper repeats oklch literals inline because Streamlit's DOM doesn't inherit `:root` CSS vars (silent fallback → unstyled). Fix: scope the var definitions to a selector Streamlit's DOM does inherit from (`.stApp` or `[data-testid="stAppViewContainer"]`) in `style.css`, then replace the literal colors in `sc_design.py` with `var(--sc-*)` references and the `PALETTE` dict. Test thoroughly on the live app since this is the third time we've hit a Streamlit CSS quirk.
@@ -98,6 +127,10 @@ Rough priority order. Pick from the top.
 - **Service-role key bypasses RLS**. RLS is enabled as a safety net but no policies exist. If you add other clients (mobile app, browser extension), introduce anon-key + RLS policies before exposing it.
 - **`load_dotenv(override=True)`** is intentional — the user's shell exports `ANTHROPIC_API_KEY=` (empty) from Claude Desktop, which would otherwise silently shadow the `.env` value.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
+- **Three Streamlit CSS gotchas** to remember:
+  - `st.markdown` mangles CSS (interprets `*` as emphasis). Use `st.html` for any raw HTML/CSS injection.
+  - The HTML parser closes `<style>` at the first literal `</style>` — even inside CSS comments. Escape with `.replace("</style>", "<\\/style>")` when loading CSS files.
+  - `:root` CSS variables don't propagate into Streamlit's component DOM. Use literal colors in inline styles until/unless you scope vars to `.stApp` (see Design-system cleanup in backlog).
 
 ## Useful one-liners
 
@@ -116,4 +149,4 @@ python3 kroger_auth.py --reauth
 ```
 
 ---
-*Last full audit: migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
+*Last update: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
