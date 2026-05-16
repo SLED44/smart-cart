@@ -71,6 +71,13 @@ To add a new visual primitive: write the helper in `sc_design.py` using `PALETTE
 ## Enhancement backlog
 Rough priority order. Pick from the top.
 
+### Shipped 2026-05-16 (efficiency + bug pass)
+- ✅ Pack-size quantity bug — "4 eggs" no longer becomes 4 cartons. `_adjust_quantity_for_pack_size` now does `ceil(N / pack_count)` so 4 eggs → 1 carton, 24 → 2.
+- ✅ Skip-LLM shortcuts in `product_matcher._try_shortcut_match`: single Kroger result → use it; top result unambiguously matches item name (all words present, no other top-5 result also matches) → use it. Both skip the Claude call entirely.
+- ✅ Trim Claude's candidate list from 10 → 5 products (search is already relevance-sorted; positions 6-10 effectively never get picked).
+- ✅ Compact matcher system prompt from ~1,000 chars → ~460.
+- Combined effect: ~60% fewer LLM tokens per session on typical lists. Matching also faster (fewer round-trips).
+
 ### Shipped in May 2026 design refresh
 - ✅ Product images on review cards (`sc_design.product_card`, 140px)
 - ✅ Match badge restyle (pastel pills, palette in `sc_design.py`)

@@ -271,33 +271,14 @@ def _normalise_kroger_product(raw: dict) -> dict:
 # Claude product match reasoning
 # ---------------------------------------------------------------------------
 
-MATCH_SYSTEM_PROMPT = """You are a grocery product matcher for a household shopping app.
-Given a grocery list item and a list of Kroger search results, select the best matching product.
+MATCH_SYSTEM_PROMPT = """Pick the best Kroger product for a grocery list item.
+Prefer exact name matches, standard household sizes, and lower prices when quality is equivalent.
+If nothing fits, return best_match_index=-1.
 
-Rules:
-- Choose the product that best matches what a typical household would want for this item
-- Prefer exact or near-exact name matches over loose category matches
-- Prefer standard sizes (e.g. 1 gallon milk, 1 dozen eggs, 1 lb pasta)
-- Prefer lower prices when quality is equivalent
-- Penalise products that are clearly different from the requested item
-- If no product is a good match, say so honestly
+Respond with ONLY this JSON, no preamble:
+{"best_match_index": 0, "confidence": 0.92, "reason": "one short sentence", "ranked_alternatives": [1,2,3]}
 
-Respond ONLY with a valid JSON object in this exact format:
-{
-  "best_match_index": 0,
-  "confidence": 0.92,
-  "reason": "Exact name match, standard size, reasonable price.",
-  "ranked_alternatives": [1, 3, 2]
-}
-
-Where:
-  best_match_index   Index (0-based) of the best product in the provided list
-  confidence         Float 0.0-1.0 indicating match quality
-  reason             One sentence explaining your choice
-  ranked_alternatives  Up to 3 other indices ranked best-to-worst as alternatives
-                       (exclude best_match_index from this list)
-
-If no product is a good match, set best_match_index to -1 and confidence to 0.0."""
+Indices are 0-based into the provided list. Exclude best_match_index from ranked_alternatives. Max 3 alternatives."""
 
 
 def _claude_select_best_match(
@@ -440,23 +421,68 @@ def _parse_match_response(text: str, num_products: int) -> dict:
 # Main matching logic
 # ---------------------------------------------------------------------------
 
+def _try_shortcut_match(item_name: str, products: list[dict]) -> dict | None:
+    """
+    Return the top product if it's an obvious match, skipping the Claude call.
+    Returns None when the choice is ambiguous and Claude should arbitrate.
+
+    Triggers:
+      - Exactly 1 search result → use it.
+      - All words from item_name appear in the top product's name, it's in stock,
+        and no OTHER top-5 result has all those words (no ambiguity).
+    """
+    import re
+
+    if not products:
+        return None
+
+    # Single-result shortcut
+    if len(products) == 1 and products[0].get("in_stock"):
+        return products[0]
+
+    # Tokenise the item name into significant words (drop tiny stopwords)
+    words = [w for w in re.findall(r"[a-z0-9]+", item_name.lower()) if len(w) > 2]
+    if not words:
+        return None
+
+    def has_all_words(prod: dict) -> bool:
+        haystack = f"{prod.get('brand','')} {prod.get('product_name','')}".lower()
+        return all(re.search(rf"\b{re.escape(w)}\b", haystack) for w in words)
+
+    top = products[0]
+    if not (top.get("in_stock") and has_all_words(top)):
+        return None
+
+    # Ambiguity check — if any of the next 4 also fully contain the item name,
+    # we don't know which the user wants. Hand off to Claude.
+    for other in products[1:5]:
+        if has_all_words(other):
+            return None
+
+    return top
+
+
 def _adjust_quantity_for_pack_size(item_quantity: float, product: dict) -> float:
     """
-    If the matched product is a multi-pack whose count matches the requested
-    quantity, return 1 (one package is sufficient).
-    Example: requesting 4 salmon portions and matching "4 ct / 20 oz" -> qty 1.
+    Convert a count of individual units into the number of multi-pack packages
+    needed. E.g. "4 eggs" matched to a 12-pack → 1 carton; "24 eggs" → 2 cartons.
+
+    Returns item_quantity unchanged if the product isn't a recognisable pack
+    (single unit, or no count phrase like "12 ct" / "6 pack" in the title/size).
     """
+    import math
     import re
     if item_quantity <= 1:
         return item_quantity
     product_name = (product.get("product_name","") + " " + product.get("size","")).lower()
-    # Look for "N ct" or "N count" or "N pack" in product name/size
     match = re.search(r"(\d+)\s*(?:ct|count|pack|pk|piece|pc)\b", product_name)
-    if match:
-        pack_count = int(match.group(1))
-        if pack_count == int(item_quantity):
-            return 1.0
-    return item_quantity
+    if not match:
+        return item_quantity
+    pack_count = int(match.group(1))
+    if pack_count < 2:
+        return item_quantity
+    # Round up: 4 eggs / 12-pack → 1 carton; 24 / 12 → 2; 13 / 12 → 2.
+    return float(math.ceil(item_quantity / pack_count))
 
 
 def _match_single_item(
@@ -556,13 +582,28 @@ def _match_single_item(
         })
         return result
 
-    # Ask Claude to pick the best match
+    # Skip Claude when the top result is obviously the right answer.
+    shortcut = _try_shortcut_match(item_name, search_results)
+    if shortcut is not None:
+        adjusted_qty = _adjust_quantity_for_pack_size(item.get("quantity", 1), shortcut)
+        alternatives = [p for p in search_results if p["upc"] != shortcut["upc"]][:MAX_ALTERNATIVES]
+        result.update({
+            "match_type":   MATCH_BEST,
+            "confidence":   0.9,
+            "primary":      shortcut,
+            "alternatives": alternatives,
+            "match_reason": "Top Kroger result matches item name unambiguously.",
+            "quantity":     adjusted_qty,
+        })
+        return result
+
+    # Ask Claude to pick the best match — top 5 only (search is relevance-sorted).
     match = _claude_select_best_match(
         item_name=item_name,
         quantity=item.get("quantity", 1.0),
         unit=item.get("unit", ""),
         notes=item.get("notes", ""),
-        products=search_results,
+        products=search_results[:5],
     )
 
     best_idx = match["best_match_index"]
