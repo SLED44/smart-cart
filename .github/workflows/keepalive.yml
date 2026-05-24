@@ -1,0 +1,44 @@
+name: Supabase keep-alive
+
+# Supabase free-tier pauses projects after 7 days of zero database activity.
+# This workflow makes a single PostgREST request twice a week (Sun + Thu)
+# so the inactivity clock never reaches 7 days.
+#
+# Requires repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL          e.g. https://odwkznptayhobwjgegin.supabase.co
+#   SUPABASE_SERVICE_KEY  service_role secret from Supabase dashboard
+#
+# Run history visible at: github.com/<owner>/<repo>/actions
+
+on:
+  schedule:
+    # Sunday + Thursday at 14:00 UTC. Twice a week → max ~4 days between
+    # pings, comfortably under Supabase's 7-day inactivity window.
+    - cron: "0 14 * * 0,4"
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST API
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_SERVICE_KEY}" ]; then
+            echo "::error::Missing SUPABASE_URL or SUPABASE_SERVICE_KEY secret"
+            exit 1
+          fi
+          # HEAD on the kv table — minimal payload, but registers as DB activity.
+          status=$(curl -sS -o /dev/null -w "%{http_code}" \
+            -X GET "${SUPABASE_URL}/rest/v1/kv?select=key&limit=1" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}")
+          echo "Supabase responded with HTTP ${status}"
+          if [ "${status}" != "200" ]; then
+            echo "::error::Unexpected status. Project may be paused or secrets are wrong."
+            exit 1
+          fi
+          echo "✓ keep-alive successful"
