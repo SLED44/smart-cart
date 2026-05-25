@@ -41,17 +41,26 @@ from mealplan.spoonacular import SPICY_TITLE_KEYWORDS
 # ---------------------------------------------------------------------------
 
 FAVORITES = (
-    ("smash_burgers",          "Smash Burgers"),
-    ("chicken_katsu",          "Chicken Katsu"),
-    ("miso_glazed_salmon",     "Miso Glazed Salmon Soba"),
-    ("greek_lamb_meatballs",   "Greek Lamb Meatballs Flatbread"),
-    ("moroccan_pork_tenderloin", "Moroccan Pork Tenderloin Couscous"),
-    ("tofu_banh_mi_bowls",     "Tofu Banh Mi Rice Vermicelli Bowls"),
+    # (slug, list of progressively-broader search queries)
+    # Spoonacular's complexSearch does literal substring title matching, not
+    # semantic search. Full PRD titles like "Smash Burgers" return zero hits
+    # because no recipe is titled that exactly. Fall back to broader words
+    # ("burger") until we get candidates the user can pick from.
+    ("smash_burgers",            ["smash burger", "smashburger", "burger"]),
+    ("chicken_katsu",            ["chicken katsu", "katsu"]),
+    ("miso_glazed_salmon",       ["miso glazed salmon", "miso salmon", "miso"]),
+    ("greek_lamb_meatballs",     ["greek lamb meatballs", "lamb meatballs", "lamb"]),
+    ("moroccan_pork_tenderloin", ["moroccan pork tenderloin", "moroccan pork", "pork tenderloin"]),
+    ("tofu_banh_mi_bowls",       ["tofu banh mi", "banh mi", "tofu bowl"]),
 )
-"""Slug + Spoonacular search title. Slug becomes recipe_id as lib_<slug>."""
+"""Slug + ordered list of progressively-broader search queries. Bootstrap
+falls through the list until one returns candidates."""
 
 DEFAULT_PROTEIN_GAP_THRESHOLD = 5
-DEFAULT_PER_CUISINE = 7
+# 5 instead of 7 (PRD §15.1.2) so the full bootstrap fits in the 150/day
+# Spoonacular free-tier cap even when favorites burn extra points on
+# progressive query fallbacks. Bump back to 7 once we have headroom.
+DEFAULT_PER_CUISINE = 5
 DEFAULT_MAX_READY = 60
 DEFAULT_FAV_CADENCE = [4, 6]
 
@@ -70,6 +79,14 @@ class BootstrapConfig:
     mild_only: bool = True
     favorites_to_pick: list[str] = field(  # slugs from FAVORITES
         default_factory=lambda: [slug for slug, _ in FAVORITES])
+
+    @staticmethod
+    def display_name(slug: str) -> str:
+        """Human-readable label for the slug (uses first query as the canonical name)."""
+        for s, queries in FAVORITES:
+            if s == slug:
+                return queries[0].title()
+        return slug
 
 
 @dataclass
@@ -106,8 +123,10 @@ def estimated_cost(config: BootstrapConfig) -> int:
     UI to gate against ``points_remaining_today``.
     """
     cost = 0
-    # Step 1: 3 candidates per favorite the user chose to look up
-    cost += sum(1 + 3 for _slug in config.favorites_to_pick)
+    # Step 1: 3 candidates per favorite, ×2 fallback budget (Spoonacular's
+    # literal title matching often misses the canonical name and we retry
+    # with broader queries — see find_favorite_candidates).
+    cost += sum(2 * (1 + 3) for _slug in config.favorites_to_pick)
     # Step 2: cuisine sweep
     cost += sum(1 + config.per_cuisine for _c in config.cuisines)
     # Step 3: gap-fill — assume up to 2 proteins need top-up, 5 each
@@ -121,18 +140,44 @@ def estimated_cost(config: BootstrapConfig) -> int:
 
 def find_favorite_candidates(
     slug: str,
-    title: str,
+    queries: list[str] | str,
     mild: bool = True,
 ) -> FavoriteCandidate:
-    """Pull top 3 Spoonacular candidates for one favorite. Costs ~4 points."""
-    candidates = spoonacular.search(
-        query=title,
-        number=3,
-        max_ready=DEFAULT_MAX_READY,
-        mild=mild,
-        sort="popularity",
-    )
-    return FavoriteCandidate(slug=slug, title_query=title, candidates=candidates)
+    """
+    Pull top 3 Spoonacular candidates for one favorite, with progressive
+    query fallback.
+
+    Spoonacular's complexSearch does literal title substring matching. The
+    canonical name ("Smash Burgers") often returns zero hits; broader words
+    ("burger") do. We try the first query, fall back to the next if the
+    first returns empty, etc. Costs 1 + n points per attempted query.
+
+    Args:
+        slug:    library slug (becomes recipe_id as lib_<slug>)
+        queries: ordered list of query strings (broadest last). A bare
+                 string is wrapped in a one-element list.
+        mild:    apply the mild-spice client-side filter
+
+    Returns:
+        FavoriteCandidate with title_query set to whichever query actually
+        produced hits (or the original query if every fallback was empty).
+    """
+    if isinstance(queries, str):
+        queries = [queries]
+    last_tried = queries[0]
+    for q in queries:
+        last_tried = q
+        candidates = spoonacular.search(
+            query=q,
+            number=3,
+            max_ready=DEFAULT_MAX_READY,
+            mild=mild,
+            sort="popularity",
+        )
+        if candidates:
+            return FavoriteCandidate(slug=slug, title_query=q, candidates=candidates)
+    # Every fallback was empty.
+    return FavoriteCandidate(slug=slug, title_query=last_tried, candidates=[])
 
 
 def save_favorite_pick(slug: str, chosen_recipe: dict) -> str:

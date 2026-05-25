@@ -89,7 +89,8 @@ def _render_config():
     col1, col2, col3 = st.columns(3)
     with col1:
         per_cuisine = int(st.number_input(
-            "Recipes per cuisine", min_value=1, max_value=20, value=7, step=1,
+            "Recipes per cuisine", min_value=1, max_value=20,
+            value=bootstrap.DEFAULT_PER_CUISINE, step=1,
             key="bs_per_cuisine"))
     with col2:
         max_ready = int(st.number_input(
@@ -107,9 +108,10 @@ def _render_config():
     st.markdown("**Favorites to seed** (uncheck any you'd rather skip):")
     favs_to_pick = []
     cols = st.columns(2)
-    for i, (slug, title) in enumerate(bootstrap.FAVORITES):
+    for i, (slug, queries) in enumerate(bootstrap.FAVORITES):
         with cols[i % 2]:
-            if st.checkbox(title, value=True, key=f"bs_fav_{slug}"):
+            label = queries[0].title()
+            if st.checkbox(label, value=True, key=f"bs_fav_{slug}"):
                 favs_to_pick.append(slug)
 
     config = bootstrap.BootstrapConfig(
@@ -147,14 +149,17 @@ def _render_config():
         with st.spinner(f"Fetching {len(favs_to_pick)} favorite candidate sets…"):
             results: list[bootstrap.FavoriteCandidate] = []
             for slug in favs_to_pick:
-                title = next((t for s, t in bootstrap.FAVORITES if s == slug), slug)
+                queries = next(
+                    (q for s, q in bootstrap.FAVORITES if s == slug),
+                    [slug.replace("_", " ")],
+                )
                 try:
                     results.append(
-                        bootstrap.find_favorite_candidates(slug, title, mild=mild_only))
+                        bootstrap.find_favorite_candidates(slug, queries, mild=mild_only))
                 except Exception as e:
-                    st.warning(f"Failed to query '{title}': {e}")
+                    st.warning(f"Failed to query '{queries[0]}': {e}")
                     results.append(bootstrap.FavoriteCandidate(
-                        slug=slug, title_query=title, candidates=[]))
+                        slug=slug, title_query=queries[0], candidates=[]))
         st.session_state[_FAV_CANDIDATES_KEY] = results
         st.session_state[_FAV_PICKS_KEY] = {}
         st.session_state[_STAGE_KEY] = "favorites_pick" if favs_to_pick else "running"
@@ -176,9 +181,20 @@ def _render_favorites_pick():
 
     for fc in candidates:
         st.divider()
-        st.markdown(f"### {fc.title_query}")
+        display = bootstrap.BootstrapConfig.display_name(fc.slug)
+        st.markdown(f"### {display}")
+        # Surface when Spoonacular's literal-substring matching forced us to
+        # broaden the query — helps the user understand why "Burger Bites"
+        # showed up instead of a smash burger.
+        if fc.title_query.lower() != display.lower():
+            st.caption(f"_(no Spoonacular results for '{display}' — broadened to "
+                       f"'{fc.title_query}')_")
         if not fc.candidates:
-            st.warning("No candidates returned. Skipping — paste-import this later.")
+            st.warning(
+                "No candidates from any fallback query. "
+                "Skipping — use **📝 Paste a recipe** later to import this one "
+                "from a Claude.ai chat."
+            )
             picks[fc.slug] = "skip"
             continue
 
