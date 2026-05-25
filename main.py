@@ -103,9 +103,13 @@ from screens import (  # noqa: E402
     home,
     item_filter,
     login,
+    mealplan_active,
     mealplan_bootstrap,
+    mealplan_home,
+    mealplan_propose,
     mealplan_rules,
     mealplan_state_import,
+    mealplan_swap,
     preferences,
     preview,
     review,
@@ -114,7 +118,7 @@ from screens import (  # noqa: E402
     store_setup,
     summary,
 )
-from screens._shared import go, pending_oauth_key  # noqa: E402
+from screens._shared import go, pending_oauth_key, render_tab_bar  # noqa: E402
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +179,10 @@ SCREENS = {
     "store_setup":           store_setup.render,
     "connect_kroger":        connect_kroger.render,
     # Meal Planner — Phase 3+. Additional screens land in subsequent phases.
+    "mealplan_home":         mealplan_home.render,
+    "mealplan_propose":      mealplan_propose.render,
+    "mealplan_swap":         mealplan_swap.render,
+    "mealplan_active":       mealplan_active.render,
     "mealplan_rules":        mealplan_rules.render,
     "mealplan_state_import": mealplan_state_import.render,
     "mealplan_bootstrap":    mealplan_bootstrap.render,
@@ -188,6 +196,9 @@ def main():
     if not st.session_state.authenticated:
         login.render()
         return
+
+    # Top tab bar (🛍 Grocery / 🍳 Meal Planner) on every authed screen.
+    render_tab_bar()
 
     screen = st.session_state.screen
     render_fn = SCREENS.get(screen)

@@ -1,8 +1,276 @@
-"""Meal-plan swap screen — per-slot candidate picker with cuisine/protein filters.
-
-Not yet wired into the router. See MEAL_PLAN_PRD.md §10 + §16, Phase 6.
 """
+Swap screen — replace one slot in the pending lineup.
+
+Entry: ``st.session_state.mealplan_swap_slot_index`` is set by the propose
+screen before navigating here. Filters (cuisine / protein / name) live in
+session_state too so they survive reruns when the user hits "Give me 5 new".
+
+Library-first; falls back to Spoonacular when both cuisine + protein are
+specified and the library has fewer than 5 eligible candidates (PRD §10.2).
+"""
+
+from datetime import datetime, timezone
+
+import streamlit as st
+
+from mealplan import library
+from mealplan.rules import _VALID_PROTEINS, default_rules, load_rules, save_rules
+from mealplan.swap import get_swap_candidates, mark_never_again
+from supabase_kv import kv_get, kv_put
+
+from screens._shared import go
+
+KEY_PENDING_LINEUP = "pending_lineup"
+KEY_HISTORY = "meal_plan_history"
+
+_SLOT_KEY = "mealplan_swap_slot_index"
+_CUISINE_KEY = "mealplan_swap_cuisine"
+_PROTEIN_KEY = "mealplan_swap_protein"
+_NAME_KEY = "mealplan_swap_name_search"
+_SEEN_KEY = "mealplan_swap_seen_ids"
+
+_ANY = "any"
 
 
 def render():
-    raise NotImplementedError("mealplan_swap — Phase 6")
+    pending = kv_get(KEY_PENDING_LINEUP, None)
+    slot_index = st.session_state.get(_SLOT_KEY)
+    if not pending or slot_index is None:
+        st.warning("No slot to swap. Open a plan from the meal-planner home first.")
+        if st.button("← Back to meal-plan home", key="mp_swap_back_lost"):
+            _clear_session()
+            go("mealplan_home")
+        return
+
+    meals = pending.get("meals") or []
+    if slot_index >= len(meals):
+        st.warning("Slot is out of range. Returning to propose screen.")
+        _clear_session()
+        go("mealplan_propose")
+        return
+
+    current_slot = meals[slot_index]
+    current_recipe = library.get(current_slot.get("recipe_id")) if current_slot.get("recipe_id") else None
+
+    st.title(f"🔁 Replace slot {slot_index + 1}")
+    if current_recipe:
+        st.caption(f"Currently: **{current_recipe.get('title','(untitled)')}** — "
+                   f"{'/'.join(current_recipe.get('proteins') or []) or 'no proteins'}, "
+                   f"{', '.join(current_recipe.get('cuisines') or []) or 'no cuisine'}")
+    else:
+        st.caption("Slot is empty — pick anything that fits.")
+
+    rules = load_rules()
+    history = kv_get(KEY_HISTORY, []) or []
+
+    _render_filter_bar(rules)
+
+    cuisine = st.session_state.get(_CUISINE_KEY, _ANY)
+    protein = st.session_state.get(_PROTEIN_KEY, _ANY)
+    name_search = st.session_state.get(_NAME_KEY, "")
+
+    cuisine_arg = None if cuisine == _ANY else cuisine
+    protein_arg = None if protein == _ANY else protein
+    name_arg = name_search.strip() or None
+    seen_ids = set(st.session_state.get(_SEEN_KEY, []))
+
+    current_lineup = []
+    for m in meals:
+        rid = m.get("recipe_id")
+        r = library.get(rid) if rid else None
+        current_lineup.append(r if r else {})
+
+    with st.spinner("Finding candidates…"):
+        result = get_swap_candidates(
+            slot_index=slot_index,
+            current_lineup=current_lineup,
+            rules=rules,
+            history=history,
+            cuisine=cuisine_arg,
+            protein=protein_arg,
+            name_search=name_arg,
+            seen_ids=seen_ids,
+        )
+
+    st.divider()
+    _render_action_bar(result)
+
+    if result.note:
+        st.info(result.note)
+    if result.spoonacular_attempted:
+        if result.spoonacular_error:
+            st.warning(f"Spoonacular query failed: {result.spoonacular_error}")
+        else:
+            st.caption(f"💡 Pulled fresh from Spoonacular to fill the gap "
+                       f"(only happens when library has <5 hits for this filter combo).")
+
+    st.divider()
+    if not result.candidates:
+        st.warning("No candidates after filtering. Try loosening the filter, or pick "
+                   "different cuisine + protein for a Spoonacular fallback.")
+        return
+
+    for cand in result.candidates:
+        _render_candidate_card(cand, slot_index, meals, pending, rules)
+
+
+# ---------------------------------------------------------------------------
+# Filter bar + action bar
+# ---------------------------------------------------------------------------
+
+def _render_filter_bar(rules: dict):
+    cuisines_all = (rules.get("cuisines") or {}).get("rotation_set") \
+        or default_rules()["cuisines"]["rotation_set"]
+
+    col_cui, col_pro, col_name = st.columns(3)
+    with col_cui:
+        cur = st.session_state.get(_CUISINE_KEY, _ANY)
+        options = [_ANY] + sorted(cuisines_all)
+        if cur not in options:
+            cur = _ANY
+        choice = st.selectbox(
+            "Cuisine", options, index=options.index(cur),
+            key=f"mp_swap_cui_input",
+            format_func=lambda v: "Any cuisine" if v == _ANY else v.title())
+        if choice != cur:
+            st.session_state[_CUISINE_KEY] = choice
+            st.session_state[_SEEN_KEY] = []  # reset paging on filter change
+            st.rerun()
+    with col_pro:
+        cur = st.session_state.get(_PROTEIN_KEY, _ANY)
+        options = [_ANY] + list(_VALID_PROTEINS)
+        if cur not in options:
+            cur = _ANY
+        choice = st.selectbox(
+            "Protein", options, index=options.index(cur),
+            key=f"mp_swap_pro_input",
+            format_func=lambda v: "Any protein" if v == _ANY else v.title())
+        if choice != cur:
+            st.session_state[_PROTEIN_KEY] = choice
+            st.session_state[_SEEN_KEY] = []
+            st.rerun()
+    with col_name:
+        cur = st.session_state.get(_NAME_KEY, "")
+        text = st.text_input("Name search", value=cur, key="mp_swap_name_input",
+                             placeholder="e.g. katsu")
+        if text != cur:
+            st.session_state[_NAME_KEY] = text
+            st.session_state[_SEEN_KEY] = []
+            st.rerun()
+
+
+def _render_action_bar(result):
+    col_back, col_reset, col_new = st.columns([1, 1, 2])
+    with col_back:
+        if st.button("← Back to propose", key="mp_swap_back"):
+            _clear_session()
+            go("mealplan_propose")
+    with col_reset:
+        if st.button("↻ Reset filters", key="mp_swap_reset"):
+            for k in (_CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY):
+                st.session_state.pop(k, None)
+            st.rerun()
+    with col_new:
+        if st.button("🔄 Give me 5 new options", key="mp_swap_new",
+                     use_container_width=True):
+            # Add current ids to seen_ids → next render pulls a fresh page.
+            seen = set(st.session_state.get(_SEEN_KEY, []))
+            for cand in result.candidates:
+                rid = cand.recipe.get("id")
+                if rid:
+                    seen.add(rid)
+            st.session_state[_SEEN_KEY] = sorted(seen)
+            st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Candidate card
+# ---------------------------------------------------------------------------
+
+def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: dict, rules: dict):
+    recipe = cand.recipe
+    rid = recipe.get("id", "")
+
+    with st.container(border=True):
+        col_img, col_body, col_actions = st.columns([1, 4, 1])
+        with col_img:
+            if recipe.get("image_url"):
+                st.image(recipe["image_url"], width=160)
+            else:
+                st.caption("🖼")
+        with col_body:
+            st.markdown(f"### {recipe.get('title','(untitled)')}")
+            meta_bits = []
+            if recipe.get("cuisines"):
+                meta_bits.append(", ".join(recipe["cuisines"]))
+            if recipe.get("proteins"):
+                meta_bits.append("· " + "/".join(recipe["proteins"]))
+            if recipe.get("ready_in_minutes"):
+                meta_bits.append(f"· {recipe['ready_in_minutes']} min")
+            if meta_bits:
+                st.caption(" ".join(meta_bits))
+            if recipe.get("last_cooked_at"):
+                st.caption(f"last cooked: {recipe['last_cooked_at'][:10]}")
+            else:
+                st.caption("never cooked yet")
+            if recipe.get("user_notes"):
+                st.caption(f"📝 _{recipe['user_notes'][:120]}_")
+            if cand.source == "spoonacular":
+                st.caption("✨ fresh from Spoonacular")
+            with st.expander(f"Score: {cand.score:.0f}"):
+                for r in cand.reasons:
+                    st.caption(f"• {r}")
+                for r in (cand.relaxations_applied or []):
+                    st.caption(f"⚙ {r}")
+        with col_actions:
+            if st.button("Pick", type="primary", key=f"mp_swap_pick_{rid}",
+                         use_container_width=True):
+                _apply_pick(rid, slot_index, meals, pending, source=cand.source)
+                return
+            if st.button("Never make", key=f"mp_swap_never_{rid}",
+                         use_container_width=True):
+                new_rules = mark_never_again(rid, rules)
+                save_rules(new_rules)
+                # Remove from seen_ids isn't necessary — it's never_again now,
+                # so future evaluate_candidate calls reject it.
+                st.rerun()
+
+
+# ---------------------------------------------------------------------------
+# Apply pick
+# ---------------------------------------------------------------------------
+
+def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, source: str):
+    cuisine = st.session_state.get(_CUISINE_KEY, _ANY)
+    protein = st.session_state.get(_PROTEIN_KEY, _ANY)
+    name_search = st.session_state.get(_NAME_KEY, "")
+    if name_search:
+        added_via = "manual_search"
+    elif cuisine != _ANY or protein != _ANY:
+        added_via = "swap_filtered"
+    else:
+        added_via = "swap_unfiltered"
+
+    meals[slot_index] = {
+        "slot":             slot_index,
+        "recipe_id":        rid,
+        "added_via":        added_via,
+        # Reasons/score are not recomputed here; lineup_meta on the propose
+        # screen recomputes against current_lineup anyway, so the per-slot
+        # rationale for swapped recipes is intentionally light.
+        "reasons":          [],
+        "relaxations":      [],
+        "score":            0,
+        "relaxation_level": 0,
+    }
+    pending["meals"] = meals
+    pending["updated_at"] = datetime.now(timezone.utc).isoformat()
+    kv_put(KEY_PENDING_LINEUP, pending)
+
+    _clear_session()
+    go("mealplan_propose")
+
+
+def _clear_session():
+    for k in (_SLOT_KEY, _CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY):
+        st.session_state.pop(k, None)
