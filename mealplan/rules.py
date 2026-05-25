@@ -90,6 +90,11 @@ _PENALTY_RECENT_HISTORY = -40
 _BONUS_FAVORITE_DUE = 30
 _BONUS_FAVORITE_FORCE = 50
 _BONUS_CUISINE_MUST_INCLUDE = 20
+# Appliance preference (extension beyond PRD §8.2 — decided 2026-05-25,
+# see memory/mealplan_appliance_bonus.md). Recipes whose equipment array
+# includes the household.default_appliance get a small score boost so they
+# float toward the top without crowding out the variety of the library.
+_BONUS_APPLIANCE_MATCH = 10
 
 _BASE_SCORE = 100.0
 
@@ -428,6 +433,13 @@ def evaluate_candidate(
         reasons.append(
             f"cooked within last {_RECENT_PENALTY_WEEKS}wk ({_PENALTY_RECENT_HISTORY})"
         )
+
+    # Appliance preference (never relaxed — small bonus, never blocks).
+    default_app = ((rules.get("household") or {}).get("default_appliance") or "").lower()
+    equipment = {(e or "").lower() for e in (recipe.get("equipment") or [])}
+    if default_app and default_app in equipment:
+        score += _BONUS_APPLIANCE_MATCH
+        reasons.append(f"matches default appliance {default_app} (+{_BONUS_APPLIANCE_MATCH})")
 
     return Evaluation(
         eligible=True,

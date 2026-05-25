@@ -38,6 +38,7 @@ def R(
     carbs=None,
     status: str = "active",
     last_cooked_at: str | None = None,
+    equipment=None,
 ) -> dict:
     return {
         "id":             id,
@@ -47,6 +48,7 @@ def R(
         "carbs":          carbs or [],
         "status":         status,
         "last_cooked_at": last_cooked_at,
+        "equipment":      equipment or [],
     }
 
 
@@ -272,6 +274,19 @@ def rules_tests(t: _T):
         assert ev.eligible, "still eligible since under ceiling"
         # 100 base - 15 protein-variety + 20 must-include - 30 soft-cap = 75
         assert ev.score == 75, ev.score
+
+    @t.case("soft: appliance bonus +10 when recipe matches default_appliance")
+    def _():
+        rules = default_rules()  # default_appliance = "air_fryer"
+        cand_air = R("a", cuisines=["italian"], proteins=["chicken"],
+                     carbs=["pasta"], equipment=["air_fryer", "sheet_pan"])
+        cand_stove = R("b", cuisines=["italian"], proteins=["chicken"],
+                       carbs=["pasta"], equipment=["stovetop"])
+        ev_air = evaluate_candidate(cand_air, rules, [], [], 0)
+        ev_stove = evaluate_candidate(cand_stove, rules, [], [], 0)
+        # Same base (100, no must-include since italian's not must-include),
+        # air-fryer recipe gets +10.
+        assert ev_air.score - ev_stove.score == 10, (ev_air.score, ev_stove.score)
 
     @t.case("soft: recently cooked -40 from history")
     def _():
