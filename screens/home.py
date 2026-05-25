@@ -10,6 +10,36 @@ from sc_design import stat_card
 from screens._shared import get_location_id, go
 
 
+# Each tuple = (screen_id, button label). The home expander filters this
+# down to screens that are actually registered in main.py's SCREENS dict,
+# so unfinished phases stay invisible until they're wired.
+_MEALPLAN_ADMIN_LINKS = (
+    ("mealplan_rules",         "⚙ Meal-plan rules"),
+    ("mealplan_state_import",  "📥 Import current state"),
+    ("mealplan_bootstrap",     "🌱 Bootstrap recipe library"),
+    ("mealplan_library",       "📚 Browse library"),
+    ("mealplan_paste_recipe",  "📝 Paste a recipe"),
+    ("mealplan_home",          "🍳 Plan meals"),
+    ("mealplan_active",        "📅 This week's plan"),
+)
+
+
+def _mealplan_admin_section():
+    """Temporary nav for wired meal-plan screens. Replaced by Phase 6."""
+    import main  # router owns the registry
+    available = [(sid, label) for sid, label in _MEALPLAN_ADMIN_LINKS
+                 if sid in main.SCREENS]
+    if not available:
+        return
+    st.divider()
+    with st.expander(f"🍴 Meal Planner ({len(available)} ready)"):
+        cols = st.columns(min(3, len(available)))
+        for i, (sid, label) in enumerate(available):
+            with cols[i % len(cols)]:
+                if st.button(label, key=f"mp_admin_{sid}", use_container_width=True):
+                    go(sid)
+
+
 def render():
     st.title("🛒 SmartCart")
 
@@ -138,6 +168,11 @@ def render():
             selected_count = sum(1 for v in st.session_state.staple_selections.values() if v)
             st.session_state.staples_added = selected_count > 0
             add_staples = st.session_state.staples_added
+
+    # Meal Planner admin section — temporary nav until Phase 6 lands the
+    # proper "Plan meals" card. Links appear as each phase wires its screen
+    # into the router.
+    _mealplan_admin_section()
 
     st.divider()
     if st.button("Sort This Out For Me →", type="primary", use_container_width=True):

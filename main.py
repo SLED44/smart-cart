@@ -103,6 +103,8 @@ from screens import (  # noqa: E402
     home,
     item_filter,
     login,
+    mealplan_rules,
+    mealplan_state_import,
     preferences,
     preview,
     review,
@@ -161,16 +163,19 @@ def _handle_oauth_callback():
 # ---------------------------------------------------------------------------
 
 SCREENS = {
-    "home":           home.render,
-    "preview":        preview.render,
-    "item_filter":    item_filter.render,
-    "sale_scan":      sale_scan.render,
-    "review":         review.render,
-    "summary":        summary.render,
-    "preferences":    preferences.render,
-    "staples":        staples.render,
-    "store_setup":    store_setup.render,
-    "connect_kroger": connect_kroger.render,
+    "home":                  home.render,
+    "preview":               preview.render,
+    "item_filter":           item_filter.render,
+    "sale_scan":             sale_scan.render,
+    "review":                review.render,
+    "summary":               summary.render,
+    "preferences":           preferences.render,
+    "staples":               staples.render,
+    "store_setup":           store_setup.render,
+    "connect_kroger":        connect_kroger.render,
+    # Meal Planner — Phase 3+. Additional screens land in subsequent phases.
+    "mealplan_rules":        mealplan_rules.render,
+    "mealplan_state_import": mealplan_state_import.render,
 }
 
 
@@ -190,4 +195,9 @@ def main():
     render_fn()
 
 
-main()
+# Gate the entry point so other modules (e.g. screens/home.py reading
+# SCREENS for the admin nav) can `import main` without triggering a full
+# re-render. Streamlit runs this file as the script, so __name__ is
+# "__main__" in the real flow and main() still fires.
+if __name__ == "__main__":
+    main()
