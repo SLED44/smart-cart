@@ -103,6 +103,7 @@ from screens import (  # noqa: E402
     home,
     item_filter,
     login,
+    mealplan_bootstrap,
     mealplan_rules,
     mealplan_state_import,
     preferences,
@@ -176,6 +177,7 @@ SCREENS = {
     # Meal Planner — Phase 3+. Additional screens land in subsequent phases.
     "mealplan_rules":        mealplan_rules.render,
     "mealplan_state_import": mealplan_state_import.render,
+    "mealplan_bootstrap":    mealplan_bootstrap.render,
 }
 
 
