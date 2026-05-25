@@ -106,6 +106,8 @@ from screens import (  # noqa: E402
     mealplan_active,
     mealplan_bootstrap,
     mealplan_home,
+    mealplan_library,
+    mealplan_paste_recipe,
     mealplan_propose,
     mealplan_rules,
     mealplan_state_import,
@@ -186,6 +188,8 @@ SCREENS = {
     "mealplan_rules":        mealplan_rules.render,
     "mealplan_state_import": mealplan_state_import.render,
     "mealplan_bootstrap":    mealplan_bootstrap.render,
+    "mealplan_library":      mealplan_library.render,
+    "mealplan_paste_recipe": mealplan_paste_recipe.render,
 }
 
 
