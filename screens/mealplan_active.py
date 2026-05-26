@@ -2,14 +2,17 @@
 Active plan screen — this week's confirmed lineup.
 
 Shows N meals from ``current_plan`` as tappable cards. Tapping opens the
-cooking view (Phase 7 — currently stubbed). "Generate grocery list" button
-hands off to SmartCart's preview screen (Phase 8 — currently stubbed).
+cooking view (Phase 7 — currently stubbed). "Generate grocery list" runs
+the aggregator and hands off to SmartCart's preview screen (Phase 8).
 """
+
+from datetime import datetime, timezone
 
 import streamlit as st
 
-from mealplan import library
-from supabase_kv import kv_get
+from mealplan import grocery, library
+from mealplan.rules import load_rules
+from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
 
@@ -29,6 +32,8 @@ def render():
     st.caption(
         f"Week #{plan.get('week_number','?')} · "
         f"confirmed {plan.get('confirmed_at','')[:10] if plan.get('confirmed_at') else ''}"
+        + (f" · grocery list generated {plan['grocery_list_generated_at'][:10]}"
+           if plan.get('grocery_list_generated_at') else "")
     )
 
     col_back, col_replan, col_grocery = st.columns([1, 2, 2])
@@ -38,22 +43,59 @@ def render():
     with col_replan:
         if st.button("🔄 Plan new (replaces this)",
                      use_container_width=True, key="mp_active_replan"):
-            # Discards confirmed plan effectively by routing to a fresh propose flow.
-            # The pending lineup gets a new session.
             st.session_state.mealplan_propose_fresh = True
             go("mealplan_propose")
     with col_grocery:
         if st.button("🛒 Generate grocery list →",
                      type="primary", use_container_width=True,
-                     disabled=True, key="mp_active_grocery"):
-            pass
-        st.caption("(Phase 8)")
+                     key="mp_active_grocery"):
+            _hand_off_to_smartcart(plan)
+            return
 
     st.divider()
 
     meals = plan.get("meals") or []
     for i, slot in enumerate(meals):
         _render_meal_card(i, slot)
+
+
+def _hand_off_to_smartcart(plan: dict):
+    """Aggregate ingredients, populate parsed_result, route to preview."""
+    rules = load_rules()
+    household_size = int(((rules.get("household") or {}).get("size")) or 4)
+
+    recipe_ids = [m.get("recipe_id") for m in (plan.get("meals") or [])
+                  if m.get("recipe_id")]
+    if not recipe_ids:
+        st.error("No recipes in this plan. Nothing to aggregate.")
+        return
+
+    with st.spinner("Aggregating ingredients…"):
+        items = grocery.aggregate_grocery_list(recipe_ids, household_size)
+
+    # Drop the meal-plan output into the SmartCart pipeline as if it came
+    # from list_parser. Reset any leftover session state from a previous
+    # SmartCart run so the flow starts clean.
+    st.session_state.parsed_result = grocery.build_parsed_result(items)
+    st.session_state.combined_items = list(items)
+    st.session_state.staples_added = False
+    st.session_state.manual_items = []
+    st.session_state.staple_selections = {}
+    # Clear stale review/match state
+    for k in ("scan_result", "matched_items", "review_index",
+              "confirmed_items", "skipped_items", "not_found_items",
+              "new_prefs_count", "cart_result", "review_history",
+              "sale_switches", "auto_confirmed_items",
+              "item_filter_selections"):
+        st.session_state.pop(k, None)
+
+    # Stamp plan so the home screen / metric knows when grocery was generated.
+    plan["grocery_list_generated_at"] = datetime.now(timezone.utc).isoformat()
+    kv_put(KEY_CURRENT_PLAN, plan)
+
+    # Route to preview — tab bar will auto-switch to Grocery since
+    # preview is mapped to the grocery tab.
+    go("preview")
 
 
 def _render_meal_card(i: int, slot: dict):
