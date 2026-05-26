@@ -1,0 +1,139 @@
+SmartCart Meal Planner — Recipe JSON schema
+============================================
+
+Schema with type annotations (use as a reference / Claude.ai snippet):
+
+{
+  "title":             "Required, string",
+  "source_url":        "Optional, the original recipe URL or empty string",
+  "image_url":         "Optional, image URL (CDN) or empty string",
+  "servings_original": 4,
+  "ready_in_minutes":  30,
+  "prep_minutes":      10,
+  "cook_minutes":      20,
+  "cuisines":          ["american"],
+  "diet_tags":         [],
+  "dish_types":        ["main course"],
+  "equipment":         ["air_fryer", "sheet_pan"],
+  "proteins":          ["beef"],
+  "carbs":             ["bread"],
+  "ingredients": [
+    {
+      "name":          "ground beef (80/20)",
+      "amount":        1.5,
+      "unit":          "lbs",
+      "aisle":         "Meat",
+      "original_text": "1.5 lbs 80/20 ground beef"
+    }
+  ],
+  "instructions": [
+    { "step_number": 1, "text": "Preheat air fryer to 425°F for 5 min." }
+  ]
+}
+
+
+Allowed enum values
+-------------------
+proteins:  beef, pork, chicken, fish, lamb, shrimp, plant
+carbs:     rice, pasta, bread, grain, potato, salad
+cuisines:  american, italian, mexican, japanese, korean, vietnamese,
+           thai, chinese, mediterranean, greek, middle_eastern,
+           moroccan, indian   (add new ones as needed)
+equipment: lowercase_with_underscores —
+           air_fryer, sheet_pan, oven, stovetop, skillet, dutch_oven,
+           instant_pot, slow_cooker, grill, blender, food_processor
+
+
+Working example (a realistic Smash Burger entry)
+------------------------------------------------
+
+{
+  "title": "Classic Smash Burgers",
+  "source_url": "",
+  "image_url": "",
+  "servings_original": 4,
+  "ready_in_minutes": 25,
+  "prep_minutes": 10,
+  "cook_minutes": 15,
+  "cuisines": ["american"],
+  "diet_tags": [],
+  "dish_types": ["main course"],
+  "equipment": ["air_fryer", "sheet_pan", "spatula"],
+  "proteins": ["beef"],
+  "carbs": ["bread"],
+  "ingredients": [
+    {
+      "name": "ground beef (80/20)",
+      "amount": 1.5,
+      "unit": "lbs",
+      "aisle": "Meat",
+      "original_text": "1.5 lbs 80/20 ground beef, divided into 8 loose balls"
+    },
+    {
+      "name": "brioche burger buns",
+      "amount": 4,
+      "unit": "count",
+      "aisle": "Bakery",
+      "original_text": "4 brioche burger buns"
+    },
+    {
+      "name": "american cheese",
+      "amount": 8,
+      "unit": "slices",
+      "aisle": "Dairy",
+      "original_text": "8 slices american cheese"
+    },
+    {
+      "name": "kosher salt",
+      "amount": 1,
+      "unit": "tsp",
+      "aisle": "Spices",
+      "original_text": "1 tsp kosher salt"
+    },
+    {
+      "name": "black pepper",
+      "amount": 0.5,
+      "unit": "tsp",
+      "aisle": "Spices",
+      "original_text": "1/2 tsp black pepper"
+    },
+    {
+      "name": "yellow onion",
+      "amount": 1,
+      "unit": "count",
+      "aisle": "Produce",
+      "original_text": "1 yellow onion, sliced thin"
+    }
+  ],
+  "instructions": [
+    { "step_number": 1, "text": "Preheat sheet pan in air-fryer mode at 500°F for 10 min." },
+    { "step_number": 2, "text": "Form beef into 8 loose 3oz balls; do not pack." },
+    { "step_number": 3, "text": "Place balls on hot pan, smash flat with spatula. Salt + pepper immediately." },
+    { "step_number": 4, "text": "Cook 2 min until edges are crispy. Flip, top with cheese, cook 1 more min." },
+    { "step_number": 5, "text": "Toast buns on the same pan for last 30 sec. Assemble with onions." }
+  ]
+}
+
+
+Notes
+-----
+- Use the in-app **📝 Paste a recipe** screen (Meal Planner tab → Settings)
+  to validate + save. The Claude.ai prompt template (also in that screen)
+  embeds this schema plus household preferences (mild spice, air-fryer-
+  first, household size 4, buy-don't-make-sauces).
+
+- ingredient `unit` accepts: "lb", "lbs", "oz", "g", "cup", "tbsp", "tsp",
+  "ml", "count", "slices", "" (empty for things like "1 onion"). Match
+  exactly across recipes so the grocery aggregator can sum quantities.
+
+- ingredient `aisle` uses Spoonacular-style labels: Meat, Seafood, Produce,
+  Dairy, Pantry, Frozen, Bakery, Beverages, Spices, "Canned and Jarred",
+  Baking, "Cleaning Products". The grocery aggregator maps these to
+  SmartCart's 8-category schema.
+
+- `instructions[].step_number` is 1-indexed and must be sequential.
+
+- All fields outside `title`, `servings_original`, `ready_in_minutes`,
+  `ingredients`, and `instructions` are optional but recommended — the
+  rules engine + planner won't crash if they're missing, just won't
+  score those dimensions.
