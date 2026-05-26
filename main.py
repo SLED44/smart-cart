@@ -105,6 +105,7 @@ from screens import (  # noqa: E402
     login,
     mealplan_active,
     mealplan_bootstrap,
+    mealplan_cook,
     mealplan_home,
     mealplan_library,
     mealplan_paste_recipe,
@@ -190,6 +191,7 @@ SCREENS = {
     "mealplan_bootstrap":    mealplan_bootstrap.render,
     "mealplan_library":      mealplan_library.render,
     "mealplan_paste_recipe": mealplan_paste_recipe.render,
+    "mealplan_cook":         mealplan_cook.render,
 }
 
 
