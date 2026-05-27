@@ -175,9 +175,13 @@ def rules_tests(t: _T):
             ev = evaluate_candidate(R("c", proteins=["beef"]), rules, lineup, [], level)
             assert not ev.eligible, f"L{level} should still reject"
 
-    @t.case("hard: vegetarian cap (plant ceiling=1) never relaxed")
+    @t.case("hard: vegetarian cap never relaxed")
     def _():
+        # Make the test independent of the default ceiling value — pin
+        # ceiling=1 explicitly so this case verifies the mechanism, not
+        # the specific dietitian-default value.
         rules = default_rules()
+        rules["protein_limits"]["plant"]["absolute_ceiling"] = 1
         lineup = [R("tofu", proteins=["plant"])]
         for level in range(5):
             ev = evaluate_candidate(R("lentil", proteins=["plant"]), rules, lineup, [], level)

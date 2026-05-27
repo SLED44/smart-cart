@@ -38,14 +38,27 @@ def render():
                "All persists to Supabase under `meal_plan_rules`.")
 
     # Top nav + save bar
-    col_back, col_reset, col_save_top = st.columns([1, 1, 2])
+    col_back, col_reload, col_defaults, col_save_top = st.columns([1, 1, 1, 2])
     with col_back:
         if st.button("← Home", key="rules_back_top"):
             _discard_draft()
             go("home")
-    with col_reset:
+    with col_reload:
         if st.button("↻ Reload from Supabase", key="rules_reload"):
             _discard_draft()
+            st.rerun()
+    with col_defaults:
+        if st.button("🥗 Load dietitian defaults", key="rules_load_defaults"):
+            # Replaces the draft with default_rules() — preserves the
+            # state.* counters from the existing draft so reloading
+            # defaults doesn't lose the current_week / last_used info.
+            existing_state = (_get_draft().get("state") or {}).copy()
+            fresh = default_rules()
+            fresh["state"].update(existing_state)
+            st.session_state[_DRAFT_KEY] = fresh
+            st.info("Draft replaced with dietitian defaults. Review, then "
+                    "**Save Rules** to persist (or **Reload from Supabase** "
+                    "to discard).")
             st.rerun()
     with col_save_top:
         if st.button("💾 Save Rules", type="primary", key="rules_save_top",

@@ -118,40 +118,64 @@ class Evaluation:
 # ---------------------------------------------------------------------------
 
 def default_rules() -> dict:
-    """Starter ruleset matching PRD §7.1. Used by the rules editor on first run."""
+    """
+    Dietitian-tuned defaults for an active family of 4 with kids under 12.
+
+    Designed 2026-05-26 (diverges from PRD §7.1 which was placeholders).
+    See memory/mealplan_dietitian_defaults.md for the full reasoning.
+
+    High-level shape per dimension:
+      Household:  size=4, mild spice (kids), air fryer default, store-bought sauces.
+      Proteins:   chicken + fish are weekly workhorses (soft 2/wk each). Red meat
+                  capped (beef ≤2/wk ceiling, pork ≤2). Lamb + shrimp occasional.
+                  Plant ≥1/wk for nutrient + variety reasons.
+      Cadences:   Shrimp hard-capped at every 4 weeks (cost + variety).
+      Carbs:      Rice + pasta + potato + salad each capped at 2/wk so no carb
+                  dominates. Bread tighter (≤1) since it's the easy default
+                  (burgers/sandwiches). Grain (quinoa/farro/couscous) uncapped
+                  to encourage exposure.
+      Cuisines:   13 rotation. Must include one of american/italian/mexican every
+                  week — kid-anchor cuisines.
+
+    For active families with teens / adult-only households / different focus
+    (heart, weight, performance), call this then customise via the rules editor.
+    """
     return {
         "household": {
             "size":                    4,
-            "meals_per_week_default":  5,
+            "meals_per_week_default":  5,    # weekday dinners; leftovers cover lunch
             "spice":                   "mild",
             "default_appliance":       "air_fryer",
             "buy_dont_make_sauces":    True,
         },
         "protein_limits": {
-            "beef":    {"max_per_week": 1,    "absolute_ceiling": 2},
-            "pork":    {"max_per_week": None, "absolute_ceiling": None},
-            "chicken": {"max_per_week": None, "absolute_ceiling": None},
-            "fish":    {"max_per_week": None, "absolute_ceiling": None},
-            "lamb":    {"max_per_week": None, "absolute_ceiling": None},
-            "shrimp":  {"max_per_week": 1,    "absolute_ceiling": 1},
-            "plant":   {"max_per_week": 1,    "absolute_ceiling": 1},
+            # max_per_week = soft cap (-30 score penalty if exceeded)
+            # absolute_ceiling = hard cap (rejected outright above this)
+            "beef":    {"max_per_week": 1, "absolute_ceiling": 2},
+            "pork":    {"max_per_week": 1, "absolute_ceiling": 2},
+            "chicken": {"max_per_week": 2, "absolute_ceiling": 3},
+            "fish":    {"max_per_week": 2, "absolute_ceiling": 3},
+            "lamb":    {"max_per_week": 1, "absolute_ceiling": 1},
+            "shrimp":  {"max_per_week": 1, "absolute_ceiling": 1},
+            "plant":   {"max_per_week": 1, "absolute_ceiling": 2},
         },
         "protein_cadences": [
+            # Shrimp every 4 weeks (PRD §7.1) — cost + protein variety.
             {"protein": "shrimp", "cadence_weeks": 4, "last_used_week": None},
         ],
         "carb_limits": {
-            "rice":   2,
-            "pasta":  None,
-            "bread":  None,
-            "grain":  None,
-            "potato": None,
-            "salad":  2,
+            "rice":   2,    # katsu, fried rice, etc.
+            "pasta":  2,    # cap to force grain rotation
+            "bread":  1,    # easy to overdo (burgers, sandwiches)
+            "grain":  None, # quinoa/couscous/farro — encourage these
+            "potato": 2,    # kid-friendly, healthy
+            "salad":  2,    # main-dish salads
         },
         "cuisines": {
             "rotation_set": [
-                "american", "italian", "mexican", "japanese", "korean",
-                "vietnamese", "thai", "chinese", "mediterranean", "greek",
-                "middle_eastern", "moroccan", "indian",
+                "american", "italian", "mexican",
+                "japanese", "korean", "vietnamese", "thai", "chinese",
+                "mediterranean", "greek", "middle_eastern", "moroccan", "indian",
             ],
             "must_include_one_of_per_week": ["american", "italian", "mexican"],
             "forbid_back_to_back_same_cuisine": True,
