@@ -15,6 +15,7 @@ times_cooked / user_notes / status fields on existing entries.
 import streamlit as st
 
 from mealplan import bootstrap, library, spoonacular
+from mealplan.event_log import EVT_BOOTSTRAP_COMPLETED, log_event
 from mealplan.rules import default_rules, load_rules
 
 from screens._shared import go
@@ -27,6 +28,8 @@ _SWEEP_RESULTS_KEY = "mealplan_bootstrap_sweep_results"
 _GAP_RESULTS_KEY = "mealplan_bootstrap_gap_results"
 _SPICE_FLAGS_KEY = "mealplan_bootstrap_spice_flags"
 _SPICE_DEMOTED_KEY = "mealplan_bootstrap_spice_demoted"
+_LIB_SIZE_BEFORE_KEY = "mealplan_bootstrap_lib_size_before"
+_POINTS_BEFORE_KEY = "mealplan_bootstrap_points_before"
 
 
 def render():
@@ -270,6 +273,10 @@ def _render_running():
 
     # Run if not yet done.
     if _SWEEP_RESULTS_KEY not in st.session_state:
+        # Snapshot before-counts so the bootstrap_completed event can
+        # report new_recipes_added + points_used accurately.
+        st.session_state[_LIB_SIZE_BEFORE_KEY] = library.data_summary()["total"]
+        st.session_state[_POINTS_BEFORE_KEY] = spoonacular.points_used_today()
         st.subheader("Cuisine sweep + protein gap-fill")
         st.caption(f"Pulling {len(config.cuisines)} cuisines × {config.per_cuisine} recipes "
                    f"each. This takes ~{len(config.cuisines) * 2}s.")
@@ -355,6 +362,25 @@ def _render_done():
     gap = st.session_state.get(_GAP_RESULTS_KEY) or {}
     demoted = int(st.session_state.get(_SPICE_DEMOTED_KEY) or 0)
     points_used = spoonacular.points_used_today()
+
+    # Fire the bootstrap_completed event once on first render of done.
+    # _LIB_SIZE_BEFORE_KEY is set in running stage; if missing we skip
+    # the event (means user landed here via reset/back).
+    if _LIB_SIZE_BEFORE_KEY in st.session_state:
+        lib_before = int(st.session_state.pop(_LIB_SIZE_BEFORE_KEY))
+        points_before = int(st.session_state.pop(_POINTS_BEFORE_KEY, 0) or 0)
+        config = st.session_state.get(_CONFIG_KEY)
+        log_event(EVT_BOOTSTRAP_COMPLETED, {
+            "cuisines_swept":     list(config.cuisines) if config else [],
+            "per_cuisine":        int(config.per_cuisine) if config else 0,
+            "max_ready":          int(config.max_ready) if config else 0,
+            "favorites_picked":   sum(1 for r in (st.session_state.get(_FAV_CANDIDATES_KEY) or [])
+                                      if (st.session_state.get(_FAV_PICKS_KEY) or {}).get(r.slug) not in (None, "skip")),
+            "new_recipes_added":  summary["total"] - lib_before,
+            "points_used":        points_used - points_before,
+            "spicy_demoted":      demoted,
+            "library_size_after": summary["total"],
+        })
 
     st.subheader("✅ Bootstrap complete")
 

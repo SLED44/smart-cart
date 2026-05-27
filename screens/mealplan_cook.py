@@ -18,6 +18,12 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from mealplan import library
+from mealplan.event_log import (
+    EVT_RECIPE_CHANGED,
+    EVT_RECIPE_COOKED,
+    EVT_RECIPE_NEVER_AGAIN,
+    log_event,
+)
 from mealplan.rules import load_rules, save_rules
 from mealplan.swap import mark_never_again
 
@@ -162,6 +168,11 @@ def _render_action_buttons(rid: str, recipe: dict, rules: dict):
         if st.button("✓ Made it", type="primary",
                      use_container_width=True, key="cook_made"):
             library.record_cooked(rid)
+            log_event(EVT_RECIPE_COOKED, {
+                "recipe_id":         rid,
+                "title":             recipe.get("title", ""),
+                "new_times_cooked":  int(recipe.get("times_cooked") or 0) + 1,
+            })
             st.session_state[_FLASH_KEY] = "Logged — times cooked +1."
             _clear_session()
             go("mealplan_active")
@@ -199,7 +210,15 @@ def _render_notes_editor(rid: str, recipe: dict):
         if st.button("Save notes + mark cooked",
                      type="primary", use_container_width=True,
                      key="cook_notes_save"):
+            prior_notes = recipe.get("user_notes", "")
             library.record_cooked(rid, notes=new_notes)
+            log_event(EVT_RECIPE_CHANGED, {
+                "recipe_id":         rid,
+                "title":             recipe.get("title", ""),
+                "prior_notes":       prior_notes,
+                "new_notes":         new_notes,
+                "new_times_cooked":  int(recipe.get("times_cooked") or 0) + 1,
+            })
             st.session_state[_FLASH_KEY] = "Notes saved; times cooked +1."
             _clear_session()
             go("mealplan_active")
@@ -222,6 +241,11 @@ def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
                      use_container_width=True, key="cook_never_yes"):
             new_rules = mark_never_again(rid, rules)
             save_rules(new_rules)
+            log_event(EVT_RECIPE_NEVER_AGAIN, {
+                "recipe_id": rid,
+                "title":     recipe.get("title", ""),
+                "via":       "cook_screen",
+            })
             st.session_state[_FLASH_KEY] = (
                 f"Excluded {recipe.get('title','recipe')} from future planning."
             )

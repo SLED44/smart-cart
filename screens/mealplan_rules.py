@@ -13,6 +13,7 @@ Reset reloads from KV (discarding unsaved changes).
 import streamlit as st
 
 from mealplan import library
+from mealplan.event_log import EVT_RULES_CHANGED, log_event, rules_diff
 from mealplan.rules import (
     _VALID_PROTEINS,
     _VALID_CARBS,
@@ -108,12 +109,17 @@ def _save(draft: dict):
         for e in errs:
             st.write(f"• {e}")
         return
+    # Snapshot the prior state so the event log records a field-level diff.
+    prior = load_rules()
     try:
         save_rules(draft)
     except Exception as e:
         st.error(f"Save failed: {e}")
         return
-    st.success("Rules saved.")
+    diff = rules_diff(prior, draft)
+    if diff:
+        log_event(EVT_RULES_CHANGED, {"changed_fields": diff})
+    st.success("Rules saved." + (f" ({len(diff)} field(s) changed)" if diff else " (no changes)"))
     # Keep the draft in sync with what's now persisted.
     st.session_state[_DRAFT_KEY] = load_rules()
 

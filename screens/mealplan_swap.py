@@ -14,6 +14,11 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from mealplan import library
+from mealplan.event_log import (
+    EVT_RECIPE_NEVER_AGAIN,
+    EVT_SLOT_SWAPPED,
+    log_event,
+)
 from mealplan.rules import _VALID_PROTEINS, default_rules, load_rules, save_rules
 from mealplan.swap import get_swap_candidates, mark_never_again
 from supabase_kv import kv_get, kv_put
@@ -231,6 +236,11 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                          use_container_width=True):
                 new_rules = mark_never_again(rid, rules)
                 save_rules(new_rules)
+                log_event(EVT_RECIPE_NEVER_AGAIN, {
+                    "recipe_id": rid,
+                    "title":     recipe.get("title", ""),
+                    "via":       "swap_screen",
+                })
                 # Remove from seen_ids isn't necessary — it's never_again now,
                 # so future evaluate_candidate calls reject it.
                 st.rerun()
@@ -250,6 +260,25 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
         added_via = "swap_filtered"
     else:
         added_via = "swap_unfiltered"
+
+    # Telemetry — capture the swap with old + new + filters so summary
+    # can spot persistently-swapped recipes (candidates for rule changes).
+    old_meal = meals[slot_index] if slot_index < len(meals) else {}
+    old_rid = old_meal.get("recipe_id")
+    old_recipe = library.get(old_rid) if old_rid else None
+    new_recipe = library.get(rid)
+    log_event(EVT_SLOT_SWAPPED, {
+        "slot":           slot_index,
+        "old_recipe_id":  old_rid,
+        "old_title":      (old_recipe or {}).get("title", ""),
+        "new_recipe_id":  rid,
+        "new_title":      (new_recipe or {}).get("title", ""),
+        "cuisine_filter": None if cuisine == _ANY else cuisine,
+        "protein_filter": None if protein == _ANY else protein,
+        "name_search":    name_search.strip() if name_search else "",
+        "source":         source,
+        "added_via":      added_via,
+    })
 
     meals[slot_index] = {
         "slot":             slot_index,

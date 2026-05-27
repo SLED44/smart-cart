@@ -16,6 +16,12 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from mealplan import library
+from mealplan.event_log import (
+    EVT_PLAN_CONFIRMED,
+    EVT_PLAN_PROPOSED,
+    EVT_PLAN_REGENERATED,
+    log_event,
+)
 from mealplan.planner import (
     NoCandidatesError,
     SlotResult,
@@ -122,11 +128,29 @@ def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None) 
             go("mealplan_home")
         return None
 
-    return {
+    pending = {
         "n":          n,
         "meals":      [_slot_to_dict(i, s) for i, s in enumerate(result.slots)],
         "updated_at": _now_iso(),
     }
+    # Telemetry — record the original proposal before user touches it.
+    log_event(EVT_PLAN_PROPOSED, {
+        "n":            n,
+        "is_regenerate": bool(exclude_ids),
+        "meals": [
+            {"recipe_id": s.recipe.get("id"),
+             "title":     s.recipe.get("title"),
+             "score":     s.score,
+             "added_via": s.added_via,
+             "relaxation_level": s.relaxation_level,
+             "reasons":   s.reasons,
+             "cuisines":  s.recipe.get("cuisines") or [],
+             "proteins":  s.recipe.get("proteins") or [],
+             "carbs":     s.recipe.get("carbs") or []}
+            for s in result.slots
+        ],
+    })
+    return pending
 
 
 def _slot_to_dict(i: int, s: SlotResult) -> dict:
@@ -146,6 +170,13 @@ def _reroll(n: int, rules: dict, current_meals: list[dict]):
     with st.spinner("Rerolling lineup…"):
         new_pending = _generate_pending(n, rules, exclude_ids=prior_ids)
     if new_pending is not None:
+        # Telemetry — separate from plan_proposed so summary can count
+        # rerolls distinctly.
+        log_event(EVT_PLAN_REGENERATED, {
+            "prior_recipe_ids": sorted(rid for rid in prior_ids if rid),
+            "new_recipe_ids":   [m["recipe_id"] for m in new_pending["meals"]
+                                 if m.get("recipe_id")],
+        })
         kv_put(KEY_PENDING_LINEUP, new_pending)
     st.rerun()
 
@@ -318,6 +349,18 @@ def _confirm(meals: list[dict], rules: dict):
     save_rules(new_rules)
 
     kv_delete(KEY_PENDING_LINEUP)
+
+    # Telemetry — record the confirmed final lineup. summarize_for_dietitian
+    # correlates this with the most-recent plan_proposed by week.
+    log_event(EVT_PLAN_CONFIRMED, {
+        "week_number": week_number,
+        "meals": [
+            {"recipe_id": m["recipe_id"],
+             "title":     library.get(m["recipe_id"]).get("title") if library.get(m["recipe_id"]) else "",
+             "added_via": m.get("added_via", "proposal")}
+            for m in meals
+        ],
+    }, week=week_number)
 
     st.success(f"Plan confirmed for week #{week_number}. Opening this week's plan…")
     go("mealplan_active")

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import streamlit as st
 
 from mealplan import grocery, library
+from mealplan.event_log import EVT_GROCERY_GENERATED, log_event
 from mealplan.rules import load_rules
 from supabase_kv import kv_get, kv_put
 
@@ -92,6 +93,13 @@ def _hand_off_to_smartcart(plan: dict):
     # Stamp plan so the home screen / metric knows when grocery was generated.
     plan["grocery_list_generated_at"] = datetime.now(timezone.utc).isoformat()
     kv_put(KEY_CURRENT_PLAN, plan)
+
+    log_event(EVT_GROCERY_GENERATED, {
+        "plan_week_number": plan.get("week_number"),
+        "recipe_count":     len(recipe_ids),
+        "item_count":       len(items),
+        "household_size":   household_size,
+    }, week=plan.get("week_number"))
 
     # Route to preview — tab bar will auto-switch to Grocery since
     # preview is mapped to the grocery tab.

@@ -11,6 +11,7 @@ Per PRD §18:
 import streamlit as st
 
 from mealplan import library
+from mealplan.event_log import EVT_RECIPE_NEVER_AGAIN, log_event
 from mealplan.rules import _VALID_PROTEINS, load_rules, save_rules
 
 from screens._shared import go
@@ -183,6 +184,11 @@ def _render_admin_controls(recipe: dict, rules: dict):
                 excl.add(rid)
                 rules["exclusions"] = sorted(excl)
                 save_rules(rules)
+                log_event(EVT_RECIPE_NEVER_AGAIN, {
+                    "recipe_id": rid,
+                    "title":     recipe.get("title", ""),
+                    "via":       "library_browser",
+                })
                 st.rerun()
 
     confirm_key = f"lib_del_confirm_{rid}"
