@@ -126,8 +126,9 @@ def default_rules() -> dict:
 
     High-level shape per dimension:
       Household:  size=4, mild spice (kids), air fryer default, store-bought sauces.
-      Proteins:   chicken + fish are weekly workhorses (soft 2/wk each). Red meat
-                  capped (beef ≤2/wk ceiling, pork ≤2). Lamb + shrimp occasional.
+      Proteins:   chicken is the workhorse (soft 2/wk, ceiling 3). Fish hard-
+                  capped at 1/wk per household preference. Red meat capped
+                  (beef ≤2/wk ceiling, pork ≤2). Lamb + shrimp occasional.
                   Plant ≥1/wk for nutrient + variety reasons.
       Cadences:   Shrimp hard-capped at every 4 weeks (cost + variety).
       Carbs:      Rice + pasta + potato + salad each capped at 2/wk so no carb
@@ -154,7 +155,7 @@ def default_rules() -> dict:
             "beef":    {"max_per_week": 1, "absolute_ceiling": 2},
             "pork":    {"max_per_week": 1, "absolute_ceiling": 2},
             "chicken": {"max_per_week": 2, "absolute_ceiling": 3},
-            "fish":    {"max_per_week": 2, "absolute_ceiling": 3},
+            "fish":    {"max_per_week": 1, "absolute_ceiling": 1},
             "lamb":    {"max_per_week": 1, "absolute_ceiling": 1},
             "shrimp":  {"max_per_week": 1, "absolute_ceiling": 1},
             "plant":   {"max_per_week": 1, "absolute_ceiling": 2},
