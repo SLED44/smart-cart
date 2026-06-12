@@ -29,6 +29,9 @@ from mealplan.rules import (
     evaluate_candidate,
     relaxation_label,
 )
+from applog import get_logger
+
+_log = get_logger(__name__)
 
 # In-memory penalty applied to recipes appearing in `exclude_ids` (used by
 # regenerate_lineup so a whole-plan reroll doesn't return the same lineup).
@@ -134,6 +137,9 @@ def generate_lineup(
             added_via=added_via,
         ))
 
+    _log.info("LINEUP: %d slot(s) -> %s", len(result.slots),
+              ", ".join(f"{s.recipe.get('title','?')}({s.score:.0f})"
+                        for s in result.slots))
     return result
 
 
@@ -196,6 +202,17 @@ def _pick_for_slot(
         relax_notes = list(top_relax)
         if level > 0:
             relax_notes.append(f"relaxation level {level}: {relaxation_label(level)}")
+
+        # Trace the decision: the winner + the runners-up we passed over (with
+        # scores), so we can see *why* this recipe beat the rest.
+        slot_pos = len(already_chosen) + 1
+        _log.info("SLOT %d: picked %r score=%.1f (level=%d) from %d eligible",
+                  slot_pos, top_recipe.get("title", top_recipe.get("id", "?")),
+                  top_score, level, len(candidates))
+        for sc, rec, _rs, _rx in candidates[1:6]:
+            _log.info("SLOT %d:   passed over %r score=%.1f",
+                      slot_pos, rec.get("title", rec.get("id", "?")), sc)
+
         return (top_recipe, top_score, top_reasons, relax_notes), level
 
     return None, MAX_RELAXATION_LEVEL

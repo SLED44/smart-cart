@@ -62,6 +62,9 @@ from dotenv import load_dotenv
 
 from kroger_auth import get_valid_token
 from preference_store import get_all_preferences, normalise_item_key
+from applog import get_logger
+
+_log = get_logger(__name__)
 
 load_dotenv(override=True)
 
@@ -482,7 +485,11 @@ def _adjust_quantity_for_pack_size(item_quantity: float, product: dict) -> float
     if pack_count < 2:
         return item_quantity
     # Round up: 4 eggs / 12-pack → 1 carton; 24 / 12 → 2; 13 / 12 → 2.
-    return float(math.ceil(item_quantity / pack_count))
+    adjusted = float(math.ceil(item_quantity / pack_count))
+    _log.info("PACK %r: requested=%s / pack_count=%s -> %s (size=%r)",
+              product.get("product_name", "?"), item_quantity, pack_count,
+              adjusted, product.get("size", ""))
+    return adjusted
 
 
 def _match_single_item(
@@ -688,6 +695,14 @@ def match_items(parsed_items: list) -> list:
             lambda item: _match_single_item(item, preferences, location_id, token),
             parsed_items,
         ))
+
+    # Per-item match detail (helps trace where a quantity/unit goes wrong).
+    for m in matched:
+        prod = m.get("primary") or {}
+        _log.info("MATCH %r: qty=%s %s -> %r (%s) [%s]",
+                  m.get("item_name", "?"), m.get("quantity"), m.get("unit", ""),
+                  prod.get("product_name", "(none)"), prod.get("size", ""),
+                  m.get("match_type", "?"))
 
     # Single summary print (per-item logging from worker threads is noisy)
     summary = {}

@@ -16,6 +16,9 @@ from mealplan.rules import load_rules
 from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
+from applog import get_logger, log_items
+
+_log = get_logger(__name__)
 
 KEY_CURRENT_PLAN = "current_plan"
 
@@ -74,15 +77,26 @@ def _hand_off_to_smartcart(plan: dict):
     with st.spinner("Aggregating ingredients…"):
         items = grocery.aggregate_grocery_list(recipe_ids, household_size)
 
-    # Drop the meal-plan output into the SmartCart pipeline as if it came
-    # from list_parser. Reset any leftover session state from a previous
-    # SmartCart run so the flow starts clean.
-    st.session_state.parsed_result = grocery.build_parsed_result(items)
-    st.session_state.combined_items = list(items)
+    _log.info("handoff: %d recipe(s), household=%d -> %d aggregated item(s)",
+              len(recipe_ids), household_size, len(items))
+    log_items(_log, "handoff.aggregated", items)
+
+    # Load the aggregated list onto the main grocery page (home) as editable
+    # text, where the user can add pantry / staple items before parsing.
+    # Routing through home → list_parser → item_filter keeps a single grocery
+    # entry point and runs the list through the standard, tested pipeline. The
+    # old direct-to-preview hand-off fed pre-structured items straight into the
+    # matcher, which is where the unit artifacts (counts shown as lb/bunch) and
+    # the recipe-title-next-to-each-ingredient clutter came from.
+    st.session_state.raw_list = _items_to_text(items)
+    st.session_state.meal_plan_handoff = True
+
+    # Reset any leftover session state from a previous SmartCart run.
+    st.session_state.parsed_result = None
+    st.session_state.combined_items = []
     st.session_state.staples_added = False
     st.session_state.manual_items = []
     st.session_state.staple_selections = {}
-    # Clear stale review/match state
     for k in ("scan_result", "matched_items", "review_index",
               "confirmed_items", "skipped_items", "not_found_items",
               "new_prefs_count", "cart_result", "review_history",
@@ -101,9 +115,48 @@ def _hand_off_to_smartcart(plan: dict):
         "household_size":   household_size,
     }, week=plan.get("week_number"))
 
-    # Route to preview — tab bar will auto-switch to Grocery since
-    # preview is mapped to the grocery tab.
-    go("preview")
+    # Land on the main grocery page with the list loaded.
+    go("home")
+
+
+def _items_to_text(items: list[dict]) -> str:
+    """Render aggregated grocery items as one editable line each, e.g.
+    '2.5 lb chicken wings' or '8 celery'. Count/serving/blank units are
+    dropped so each line reads naturally for the list parser. The recipe
+    title (carried in 'notes') is intentionally omitted — it is not part of
+    the shopping line.
+
+    The aggregator keeps same-ingredient/different-unit rows separate
+    (PRD §12.4); merge them here so the parser sees one line per ingredient.
+    Same unit → sum quantities; mixed units → emit the bare name (the shopper
+    buys one sensible package either way, and 'tbsp + cup' sums are garbage)."""
+    merged: dict[str, dict] = {}
+    for it in items:
+        name = (it.get("item_name") or "").strip()
+        if not name:
+            continue
+        qty = it.get("quantity")
+        unit = (it.get("unit") or "").strip().lower()
+        if unit in ("count", "serving", "servings"):
+            unit = ""
+        key = name.lower()
+        if key not in merged:
+            merged[key] = {"name": name, "qty": qty, "unit": unit}
+        else:
+            slot = merged[key]
+            if slot["unit"] == unit and slot["qty"] is not None and qty is not None:
+                slot["qty"] += qty
+            else:
+                slot["qty"], slot["unit"] = None, ""
+
+    lines: list[str] = []
+    for slot in merged.values():
+        qty = slot["qty"]
+        if isinstance(qty, float) and qty == int(qty):
+            qty = int(qty)
+        prefix = " ".join(str(p) for p in (qty, slot["unit"]) if p not in (None, "", 0))
+        lines.append(f"{prefix} {slot['name']}".strip())
+    return "\n".join(lines)
 
 
 def _render_meal_card(i: int, slot: dict):

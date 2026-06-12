@@ -21,6 +21,9 @@ from mealplan.event_log import (
 )
 from mealplan.rules import _VALID_PROTEINS, default_rules, load_rules, save_rules
 from mealplan.swap import get_swap_candidates, mark_never_again
+from applog import get_logger
+
+_log = get_logger(__name__)
 from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
@@ -114,6 +117,18 @@ def render():
         st.warning("No candidates after filtering. Try loosening the filter, or pick "
                    "different cuisine + protein for a Spoonacular fallback.")
         return
+
+    # Trace + stash the alternatives presented so the eventual pick can record
+    # what was shown vs. what was passed over.
+    shown = [{"recipe_id": c.recipe.get("id"),
+              "title":     c.recipe.get("title"),
+              "score":     c.score,
+              "source":    c.source}
+             for c in result.candidates]
+    st.session_state["mp_swap_shown"] = shown
+    _log.info("SWAP slot %d: showing %d alternative(s): %s",
+              slot_index + 1, len(shown),
+              ", ".join(f"{s['title']}({s['score']:.0f})" for s in shown))
 
     for cand in result.candidates:
         _render_candidate_card(cand, slot_index, meals, pending, rules)
@@ -267,6 +282,13 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
     old_rid = old_meal.get("recipe_id")
     old_recipe = library.get(old_rid) if old_rid else None
     new_recipe = library.get(rid)
+    shown = st.session_state.get("mp_swap_shown") or []
+    passed_over = [s for s in shown if s.get("recipe_id") != rid]
+    _log.info("SWAP slot %d: picked %r over %d other(s): %s",
+              slot_index + 1, (new_recipe or {}).get("title", rid),
+              len(passed_over),
+              ", ".join(f"{s['title']}({s['score']:.0f})" for s in passed_over))
+
     log_event(EVT_SLOT_SWAPPED, {
         "slot":           slot_index,
         "old_recipe_id":  old_rid,
@@ -278,6 +300,8 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
         "name_search":    name_search.strip() if name_search else "",
         "source":         source,
         "added_via":      added_via,
+        "alternatives_shown": shown,
+        "passed_over":    passed_over,
     })
 
     meals[slot_index] = {

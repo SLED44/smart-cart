@@ -51,7 +51,7 @@ SCHEMA_BLOCK = '''{
 }'''
 
 # Allowed values surfaced to the user so the prompt template is self-contained.
-_PROTEINS = ("beef", "pork", "chicken", "fish", "lamb", "shrimp", "plant")
+_PROTEINS = ("beef", "pork", "chicken", "turkey", "fish", "lamb", "shrimp", "plant")
 _CARBS = ("rice", "pasta", "bread", "grain", "potato", "salad")
 
 CLAUDE_PROMPT_TEMPLATE = '''Convert this recipe to the SmartCart Meal Planner JSON schema.

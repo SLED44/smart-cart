@@ -41,8 +41,11 @@ import anthropic
 from dotenv import load_dotenv
 
 from preference_store import get_all_preferences, normalise_item_key
+from applog import get_logger, log_items
 
 load_dotenv(override=True)
+
+_log = get_logger(__name__)
 
 # ---------------------------------------------------------------------------
 # Claude client
@@ -187,6 +190,10 @@ def parse_grocery_list(raw_text: str) -> dict:
 
     # Enrich each item with normalised key and preference flag
     enriched_items = _enrich_items(items)
+
+    _log.info("parse_grocery_list: %d char input -> %d item(s)",
+              len(raw_text or ""), len(enriched_items))
+    log_items(_log, "list_parser.parsed", enriched_items)
 
     return {
         "items":          enriched_items,

@@ -45,6 +45,9 @@ from dotenv import load_dotenv
 
 from kroger_auth import get_valid_token
 from preference_store import append_session_log
+from applog import get_logger
+
+_log = get_logger(__name__)
 
 load_dotenv(override=True)
 
@@ -88,6 +91,9 @@ def _build_cart_items(confirmed_items: list) -> list[dict]:
             continue
 
         quantity = max(1, round(item.get("quantity", 1)))
+        _log.info("CART %r: qty=%s upc=%s (%r)",
+                  item.get("item_name", "?"), quantity, upc,
+                  primary.get("product_name", "?"))
         cart_items.append({"upc": upc, "quantity": quantity})
 
     return cart_items

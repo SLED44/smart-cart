@@ -8,6 +8,9 @@ import preference_store
 from sc_design import stat_card
 
 from screens._shared import get_location_id, go
+from applog import get_logger, log_items
+
+_log = get_logger(__name__)
 
 
 def render():
@@ -73,6 +76,10 @@ def render():
     st.divider()
     st.subheader("What are we cooking this week? 🍳")
     st.caption("Paste your list — bullets, prose, categorised, mixed. We'll figure it out.")
+
+    if st.session_state.get("meal_plan_handoff"):
+        st.success("📅 Loaded from your meal plan — add any pantry staples "
+                   "below, then **Sort This Out For Me** to continue.")
 
     raw_list = st.text_area(
         "Grocery list",
@@ -161,7 +168,10 @@ def render():
 
         # Combine parsed items + staples into combined_items before item filter
         parsed = st.session_state.parsed_result
-        items = list(parsed["items"])
+        # Collapse duplicate item_keys (same ingredient parsed from two lines,
+        # e.g. a meal-plan list with "3 tbsp olive oil" + "0.5 cup olive oil").
+        # Duplicate keys crash item_filter's checkboxes (filter_cb_<key>).
+        items = list_parser.validate_parsed_items(list(parsed["items"]))
 
         if st.session_state.staples_added:
             staples = preference_store.get_all_staples()
@@ -184,4 +194,7 @@ def render():
                     })
 
         st.session_state.combined_items = items
+        log_items(_log, "home.combined(+staples)", items)
+        # Meal-plan load has been consumed; don't show the banner after parse.
+        st.session_state.pop("meal_plan_handoff", None)
         go("item_filter")

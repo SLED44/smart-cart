@@ -155,6 +155,7 @@ def default_rules() -> dict:
             "beef":    {"max_per_week": 1, "absolute_ceiling": 2},
             "pork":    {"max_per_week": 1, "absolute_ceiling": 2},
             "chicken": {"max_per_week": 2, "absolute_ceiling": 3},
+            "turkey":  {"max_per_week": 1, "absolute_ceiling": 2},
             "fish":    {"max_per_week": 1, "absolute_ceiling": 1},
             "lamb":    {"max_per_week": 1, "absolute_ceiling": 1},
             "shrimp":  {"max_per_week": 1, "absolute_ceiling": 1},
@@ -229,7 +230,7 @@ def _merge_with_defaults(stored: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 _VALID_SPICE = ("mild", "medium", "hot")
-_VALID_PROTEINS = ("beef", "pork", "chicken", "fish", "lamb", "shrimp", "plant")
+_VALID_PROTEINS = ("beef", "pork", "chicken", "turkey", "fish", "lamb", "shrimp", "plant")
 _VALID_CARBS = ("rice", "pasta", "bread", "grain", "potato", "salad")
 
 
