@@ -7,7 +7,7 @@ import list_parser
 import product_matcher
 import sale_scanner
 
-from screens._shared import go, split_auto_confirmed
+from screens._shared import clear_review_widget_state, go, split_auto_confirmed
 
 
 def render():
@@ -99,6 +99,8 @@ def render():
 def _run_matching_pipeline():
     """Run sale scan then product matching, then navigate to next screen."""
     items = st.session_state.combined_items
+    # Fresh run — drop any per-index review state left by a previous run.
+    clear_review_widget_state()
 
     with st.spinner("🏷 Scoping for deals…"):
         try:

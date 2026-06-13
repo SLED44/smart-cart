@@ -42,7 +42,16 @@ SCHEMA_BLOCK = '''{
       "amount":        1.5,
       "unit":          "lbs",
       "aisle":         "Meat",
+      "group":         "Patties",
       "original_text": "1.5 lbs 80/20 ground beef"
+    },
+    {
+      "name":          "burger sauce (store-bought)",
+      "amount":        0.5,
+      "unit":          "cup",
+      "aisle":         "Pantry",
+      "group":         "For serving",
+      "original_text": "1/2 cup burger sauce"
     }
   ],
   "instructions": [
@@ -78,9 +87,19 @@ CLAUDE_PROMPT_TEMPLATE = '''Convert this recipe to the SmartCart Meal Planner JS
   dutch_oven, instant_pot, skillet, stovetop, oven, grill, slow_cooker)
 - `ingredients[].amount` — number (decimal OK). `unit` — "lb", "oz", "g",
   "cup", "tbsp", "tsp", "ml", "count", "" (for things like "1 onion").
-  `aisle` — Spoonacular-style: Meat, Seafood, Produce, Dairy, Pantry,
+  Exactly ONE unit per ingredient — convert metric originals, never write
+  both. `aisle` — Spoonacular-style: Meat, Seafood, Produce, Dairy, Pantry,
   Frozen, Bakery, Beverages, Spices, Canned and Jarred, Baking.
+- `ingredients[].group` — component label so the cook can mise-en-place:
+  "Sauce", "Marinade", "Bowls", "For serving", etc. Group every ingredient
+  when the recipe has 2+ components; use "" for one-component recipes.
 - `instructions[].step_number` — 1-indexed integer, sequential.
+- `instructions[].text` — substantive steps a home cook can follow without
+  re-reading the ingredient list: repeat quantities in the step ("add 2 tbsp
+  soy sauce"), give temperatures, times, AND doneness cues ("until golden
+  and 165°F internal"). Order steps so long-lead items start first ("start
+  the rice before the stir fry"). 6-10 steps for a typical mains recipe —
+  do not compress to 4 terse steps.
 
 **Recipe to convert:**
 [PASTE YOUR RECIPE TEXT OR URL HERE]
@@ -234,6 +253,8 @@ def _validate_recipe(r: dict) -> list[str]:
                 errs.append(f"`ingredients[{i}].unit` must be a string (use \"\" for none).")
             if not isinstance(ing.get("aisle", ""), str):
                 errs.append(f"`ingredients[{i}].aisle` must be a string.")
+            if not isinstance(ing.get("group", ""), str):
+                errs.append(f"`ingredients[{i}].group` must be a string (use \"\" for ungrouped).")
 
     steps = r.get("instructions")
     if not isinstance(steps, list) or not steps:
@@ -283,7 +304,12 @@ def _render_preview_and_save(parsed: dict):
             st.markdown(f"[Source ↗]({parsed['source_url']})")
 
     with st.expander(f"Ingredients ({len(parsed.get('ingredients') or [])})"):
+        last_group = None
         for ing in parsed.get("ingredients") or []:
+            group = (ing.get("group") or "").strip()
+            if group and group != last_group:
+                st.markdown(f"**{group}**")
+            last_group = group
             unit = f" {ing.get('unit')}" if ing.get("unit") else ""
             aisle = f"  _(_{ing.get('aisle','')}_)_" if ing.get("aisle") else ""
             st.write(f"• {ing.get('amount','?')}{unit} {ing.get('name','?')}{aisle}")
@@ -374,5 +400,11 @@ def _render_preview_and_save(parsed: dict):
 
 
 def _clear_session():
-    for k in ("paste_recipe_raw", "paste_recipe_parsed", "paste_recipe_errors"):
-        st.session_state.pop(k, None)
+    # "paste_recipe_input" is the textarea's widget key — without dropping it
+    # too, Clear is a no-op (the widget state re-saves the old text on rerun).
+    for k in ("paste_recipe_raw", "paste_recipe_parsed", "paste_recipe_errors",
+              "paste_recipe_input"):
+        try:
+            st.session_state.pop(k, None)
+        except Exception:
+            pass  # Streamlit forbids touching some widget keys mid-render

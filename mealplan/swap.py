@@ -61,12 +61,20 @@ def get_swap_candidates(
     eval_lineup = [r for i, r in enumerate(current_lineup) if i != slot_index]
     excluded_ids = {r.get("id") for r in current_lineup if r.get("id")}
 
+    # One fetch of swap/outcome feedback for the whole pool evaluation.
+    try:
+        from mealplan.event_log import feedback_signals
+        feedback = feedback_signals()
+    except Exception:
+        feedback = {}
+
     # Step 1 — library-side filter
     pool = library.filter(cuisine=cuisine, protein=protein, name_search=name_search)
     pool = [r for r in pool
             if r.get("id") not in seen_ids and r.get("id") not in excluded_ids]
 
-    candidates = _evaluate_pool(pool, rules, eval_lineup, history, source="library")
+    candidates = _evaluate_pool(pool, rules, eval_lineup, history, source="library",
+                                feedback=feedback)
     result = SwapResult(candidates=candidates)
 
     if len(candidates) >= n:
@@ -106,7 +114,8 @@ def get_swap_candidates(
         new_pool = [r for r in freshly_saved if r.get("id") not in already]
 
         new_evals = _evaluate_pool(
-            new_pool, rules, eval_lineup, history, source="spoonacular"
+            new_pool, rules, eval_lineup, history, source="spoonacular",
+            feedback=feedback,
         )
         result.candidates.extend(new_evals)
     else:
@@ -141,10 +150,12 @@ def _evaluate_pool(
     eval_lineup: list[dict],
     history: list[dict],
     source: str,
+    feedback: dict | None = None,
 ) -> list[SwapCandidate]:
     out: list[SwapCandidate] = []
     for recipe in pool:
-        ev = evaluate_candidate(recipe, rules, eval_lineup, history, relaxation_level=0)
+        ev = evaluate_candidate(recipe, rules, eval_lineup, history, relaxation_level=0,
+                                feedback=feedback)
         if not ev.eligible:
             continue
         out.append(SwapCandidate(

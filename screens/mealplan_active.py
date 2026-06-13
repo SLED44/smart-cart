@@ -15,7 +15,7 @@ from mealplan.event_log import EVT_GROCERY_GENERATED, log_event
 from mealplan.rules import load_rules
 from supabase_kv import kv_get, kv_put
 
-from screens._shared import go
+from screens._shared import clear_review_widget_state, go
 from applog import get_logger, log_items
 
 _log = get_logger(__name__)
@@ -31,6 +31,12 @@ def render():
         if st.button("← Back to meal-planner home", key="mp_active_back_empty"):
             go("mealplan_home")
         return
+
+    # Flash set by the cook screen (Made it / notes saved / never again) —
+    # it navigates here immediately, so this is where the message must show.
+    flash = st.session_state.pop("mealplan_cook_flash", None)
+    if flash:
+        st.success(flash)
 
     st.title("📅 This week's plan")
     st.caption(
@@ -103,6 +109,7 @@ def _hand_off_to_smartcart(plan: dict):
               "sale_switches", "auto_confirmed_items",
               "item_filter_selections"):
         st.session_state.pop(k, None)
+    clear_review_widget_state()
 
     # Stamp plan so the home screen / metric knows when grocery was generated.
     plan["grocery_list_generated_at"] = datetime.now(timezone.utc).isoformat()

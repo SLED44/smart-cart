@@ -89,6 +89,7 @@ def generate_lineup(
     library: list[dict],
     history: list[dict] | None = None,
     exclude_ids: set[str] | None = None,
+    feedback: dict | None = None,
 ) -> LineupResult:
     """
     Build an N-recipe lineup greedily from ``library``.
@@ -100,6 +101,8 @@ def generate_lineup(
                      Caller filters status (e.g. library.all_active()).
         history      list[Plan] for the recent-history penalty
         exclude_ids  recipe ids to penalise heavily (regenerate path)
+        feedback     event_log.feedback_signals() result; fetched once here
+                     when None (pass {} to disable feedback scoring)
 
     Returns LineupResult with one SlotResult per slot.
 
@@ -112,6 +115,15 @@ def generate_lineup(
     history = history or []
     exclude_ids = set(exclude_ids or [])
 
+    if feedback is None:
+        # One KV fetch per generation. Guarded so the planner stays usable
+        # in pure tests / offline contexts without Supabase.
+        try:
+            from mealplan.event_log import feedback_signals
+            feedback = feedback_signals()
+        except Exception:
+            feedback = {}
+
     result = LineupResult()
     pool = list(library)
 
@@ -122,6 +134,7 @@ def generate_lineup(
             rules=rules,
             history=history,
             exclude_ids=exclude_ids,
+            feedback=feedback,
         )
         if chosen is None:
             raise NoCandidatesError(slot_index=slot_index, partial=result)
@@ -169,6 +182,7 @@ def _pick_for_slot(
     rules: dict,
     history: list[dict],
     exclude_ids: set[str],
+    feedback: dict | None = None,
 ) -> tuple[tuple[dict, float, list[str], list[str]] | None, int]:
     """
     Try relaxation level 0, then 1, ... up to MAX_RELAXATION_LEVEL. Returns
@@ -181,7 +195,8 @@ def _pick_for_slot(
             rid = recipe.get("id")
             if rid in used_ids:
                 continue
-            ev = evaluate_candidate(recipe, rules, already_chosen, history, level)
+            ev = evaluate_candidate(recipe, rules, already_chosen, history, level,
+                                    feedback=feedback)
             if not ev.eligible:
                 continue
             score = ev.score

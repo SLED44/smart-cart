@@ -128,6 +128,50 @@ def clear_events() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Feedback signals for scoring (closes the telemetry → planner loop)
+# ---------------------------------------------------------------------------
+
+FEEDBACK_WEEKS = 8  # look-back window for swap/outcome scoring signals
+
+
+def feedback_signals(weeks_back: int = FEEDBACK_WEEKS) -> dict:
+    """
+    Aggregate per-recipe planning feedback for the rules engine:
+
+        { recipe_id: {"swapped_out": int, "made_it": int, "made_changes": int} }
+
+    One KV fetch. swapped_out counts EVT_SLOT_SWAPPED where the recipe was
+    the one removed; made_it / made_changes count cooking outcomes. The
+    planner passes this into evaluate_candidate so recipes the user keeps
+    rejecting stop being re-proposed (e.g. the same recipe was proposed and
+    swapped out two weeks running before this existed).
+    """
+    try:
+        from mealplan.rules import load_rules
+        rules = load_rules()
+        current_week = int(((rules.get("state") or {}).get("current_week")) or 0)
+    except Exception:
+        current_week = 0
+    since_week = max(0, current_week - weeks_back)
+
+    out: dict[str, dict] = {}
+
+    def _slot(rid: str) -> dict:
+        return out.setdefault(rid, {"swapped_out": 0, "made_it": 0, "made_changes": 0})
+
+    for e in recent_events(n=MAX_EVENTS, since_week=since_week):
+        d = e.get("data") or {}
+        t = e.get("type")
+        if t == EVT_SLOT_SWAPPED and d.get("old_recipe_id"):
+            _slot(d["old_recipe_id"])["swapped_out"] += 1
+        elif t == EVT_RECIPE_COOKED and d.get("recipe_id"):
+            _slot(d["recipe_id"])["made_it"] += 1
+        elif t == EVT_RECIPE_CHANGED and d.get("recipe_id"):
+            _slot(d["recipe_id"])["made_changes"] += 1
+    return out
+
+
+# ---------------------------------------------------------------------------
 # Rules-diff helper (used by the rules editor before logging)
 # ---------------------------------------------------------------------------
 

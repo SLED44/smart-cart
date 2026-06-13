@@ -4,7 +4,7 @@ import streamlit as st
 
 import cart_manager
 
-from screens._shared import go
+from screens._shared import clear_review_widget_state, go
 
 
 def render():
@@ -91,5 +91,6 @@ def render():
                     "auto_confirmed_items", "item_filter_selections"]:
             if key in st.session_state:
                 del st.session_state[key]
+        clear_review_widget_state()
         _init_state()
         go("home")

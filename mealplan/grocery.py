@@ -178,6 +178,12 @@ def aggregate_grocery_list(
         scale = household_size / original_servings
         recipe_title = recipe.get("title", rid)
         for ing in (recipe.get("ingredients") or []):
+            # Spoonacular emits unit="servings" for amountless rows: to-taste
+            # items ("salt and pepper") and section headers that leaked into
+            # the ingredient list ("Salad", "Pea-mond Dressing"). Neither
+            # belongs on a shopping list.
+            if (ing.get("unit") or "").strip().lower() in ("serving", "servings"):
+                continue
             raw_items.append({
                 "canonical":    canonicalize_name(ing.get("name", "")),
                 "display_name": (ing.get("name") or "").strip(),

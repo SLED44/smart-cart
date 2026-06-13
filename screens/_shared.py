@@ -117,6 +117,24 @@ def save_location_id(location_id: str) -> None:
     os.environ["KROGER_LOCATION_ID"] = location_id
 
 
+# Per-item review-screen state is keyed by queue index (current_primary_3,
+# qty_3, save_pref_3, ...). These survive any fixed-key reset list, so a
+# second run in the same browser session would inherit the previous run's
+# selections — including a swapped product silently going to the cart.
+_REVIEW_KEY_PREFIXES = (
+    "current_primary_", "current_mt_", "qty_", "save_pref_",
+    "manual_search_", "swap_",
+)
+
+
+def clear_review_widget_state():
+    """Delete all per-index review-screen keys. Call whenever a run starts
+    or resets. ('staple_qty_' does not match the 'qty_' prefix — safe.)"""
+    for k in list(st.session_state.keys()):
+        if isinstance(k, str) and k.startswith(_REVIEW_KEY_PREFIXES):
+            del st.session_state[k]
+
+
 def split_auto_confirmed():
     """
     Before entering the review queue, pull out items that can be
@@ -143,6 +161,17 @@ def split_auto_confirmed():
             item.get("match_type") == "Preferred Match"
             and item.get("item_key") not in sale_alert_keys
         ):
+            # Weight-coverage math normally happens on the review screen,
+            # which auto-confirmed items never reach. Apply it here so
+            # "2 lbs ground beef" against a 1-lb preferred pack buys 2,
+            # not 1.
+            notes = item.get("notes", "")
+            primary = item.get("primary")
+            if notes and primary:
+                import product_matcher
+                smart = product_matcher.suggested_quantity(notes, primary)
+                if smart is not None:
+                    item = {**item, "quantity": float(smart)}
             auto_confirmed.append(item)
         else:
             needs_review.append(item)

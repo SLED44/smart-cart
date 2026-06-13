@@ -127,16 +127,47 @@ def _render_ingredients(recipe: dict, scale: float):
     st.subheader("Ingredients")
     st.caption(f"Scaled to your household ({scale:.2g}× recipe yield)" if scale != 1.0
                else "At recipe's original yield")
+    # Group by component ("Sauce", "For serving", ...) preserving first-seen
+    # order; ingredients without a group render first, unlabelled. Recipes
+    # with flat ingredient lists look exactly as before.
+    grouped: dict[str, list] = {}
     for ing in recipe.get("ingredients") or []:
-        scaled_amount = float(ing.get("amount") or 0) * scale
-        amount_str = _fmt_amount(scaled_amount)
-        unit = ing.get("unit") or ""
-        name = ing.get("name") or "(unknown)"
-        # If the recipe carried original_text, surface it too in light text —
-        # helps when the ingredient name was lossy.
-        original = ing.get("original_text", "")
-        original_hint = f"  _(_{original}_)_" if (original and original.lower() != name.lower()) else ""
-        st.write(f"• **{amount_str}** {unit} {name}{original_hint}")
+        grouped.setdefault((ing.get("group") or "").strip(), []).append(ing)
+    for group_name, ings in grouped.items():
+        if group_name:
+            st.markdown(f"**{group_name}**")
+        for ing in ings:
+            st.write(f"• {_format_ingredient_line(ing, scale)}")
+
+
+def _format_ingredient_line(ing: dict, scale: float) -> str:
+    """One amount, one unit per line. The old renderer printed the scaled
+    decimal AND original_text ('**0.67** lb chow mein noodles (16 ounces
+    (454 gram) package...)') — two or three units per ingredient.
+
+    Rules:
+    - Spoonacular 'servings'-unit rows are amountless placeholders (to-taste
+      items and section headers leaked into the list) → no fake amount.
+    - Unscaled recipe + original_text present → show original_text verbatim
+      (natural phrasing, e.g. '1 1/2 tablespoons soy sauce').
+    - Scaled → kitchen-fraction amount + unit + name; original_text is
+      omitted because its numbers contradict the scaled ones.
+    """
+    name = ing.get("name") or "(unknown)"
+    unit = (ing.get("unit") or "").strip()
+    original = (ing.get("original_text") or "").strip()
+
+    if unit.lower() in ("serving", "servings"):
+        return original if original else f"{name} — to taste / as needed"
+
+    if scale == 1.0 and original:
+        return original
+
+    scaled_amount = float(ing.get("amount") or 0) * scale
+    amount_str = _fmt_amount(scaled_amount)
+    if not scaled_amount:
+        return original or name
+    return f"**{amount_str}** {unit} {name}".replace("  ", " ")
 
 
 def _render_instructions(recipe: dict):
@@ -182,8 +213,10 @@ def _render_action_buttons(rid: str, recipe: dict, rules: dict):
             st.session_state[_NOTES_EDIT_KEY] = True
             st.rerun()
     with col_never:
-        if st.button("🚫 Never again",
-                     use_container_width=True, key="cook_never"):
+        if recipe.get("status") == "never_again":
+            st.caption("🚫 Already excluded from planning")
+        elif st.button("🚫 Never again",
+                       use_container_width=True, key="cook_never"):
             st.session_state[_DELETE_CONFIRM_KEY] = True
             st.rerun()
 
@@ -241,11 +274,14 @@ def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
                      use_container_width=True, key="cook_never_yes"):
             new_rules = mark_never_again(rid, rules)
             save_rules(new_rules)
-            log_event(EVT_RECIPE_NEVER_AGAIN, {
-                "recipe_id": rid,
-                "title":     recipe.get("title", ""),
-                "via":       "cook_screen",
-            })
+            # Guard against double-logging (e.g. marked again on a later
+            # visit) — the event log feeds scoring/curation stats.
+            if recipe.get("status") != "never_again":
+                log_event(EVT_RECIPE_NEVER_AGAIN, {
+                    "recipe_id": rid,
+                    "title":     recipe.get("title", ""),
+                    "via":       "cook_screen",
+                })
             st.session_state[_FLASH_KEY] = (
                 f"Excluded {recipe.get('title','recipe')} from future planning."
             )
@@ -257,10 +293,21 @@ def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
 # Helpers
 # ---------------------------------------------------------------------------
 
+_KITCHEN_FRACTIONS = (
+    (0.125, "⅛"), (0.25, "¼"), (0.333, "⅓"), (0.375, "⅜"), (0.5, "½"),
+    (0.625, "⅝"), (0.667, "⅔"), (0.75, "¾"), (0.875, "⅞"),
+)
+
+
 def _fmt_amount(q: float) -> str:
-    """Show whole numbers without trailing decimals; otherwise 2dp."""
+    """Kitchen-friendly amounts: 0.67 → '⅔', 2.5 → '2½', 0.171 → '0.17'."""
     if q == int(q):
         return str(int(q))
+    whole = int(q)
+    frac = q - whole
+    for value, glyph in _KITCHEN_FRACTIONS:
+        if abs(frac - value) <= 0.04:
+            return f"{whole}{glyph}" if whole else glyph
     return f"{q:.2f}".rstrip("0").rstrip(".")
 
 

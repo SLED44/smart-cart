@@ -96,6 +96,14 @@ _BONUS_CUISINE_MUST_INCLUDE = 20
 # float toward the top without crowding out the variety of the library.
 _BONUS_APPLIANCE_MATCH = 10
 
+# Planning-feedback signals from the event log (extension beyond PRD §8.2 —
+# added 2026-06-12 after the same recipe was proposed and swapped out two
+# weeks running). Sourced from event_log.feedback_signals(); never relaxed.
+_PENALTY_SWAPPED_OUT = -25   # per swap-out in the look-back window…
+_SWAPPED_OUT_FLOOR = -50     # …capped here so one bad month isn't a death sentence
+_PENALTY_MADE_CHANGES = -10  # cooked, but needed tweaks — mild demotion
+_BONUS_MADE_IT = 15          # cooked as written — gentle promotion
+
 _BASE_SCORE = 100.0
 
 
@@ -311,12 +319,17 @@ def evaluate_candidate(
     current_lineup: list[dict],
     history: list[dict] | None = None,
     relaxation_level: int = 0,
+    feedback: dict | None = None,
 ) -> Evaluation:
     """
     Evaluate a single recipe against the ruleset. See PRD §8.2.
 
     Hard rules (never relaxed) short-circuit to eligible=False.
     Soft rules contribute to the score and are dampened by relaxation_level.
+
+    ``feedback`` is event_log.feedback_signals() — per-recipe swap-out and
+    cooked-outcome counts. Optional so pure-rules tests don't need KV; the
+    planner fetches it once per generation and passes it down.
     """
     history = history or []
 
@@ -466,6 +479,21 @@ def evaluate_candidate(
     if default_app and default_app in equipment:
         score += _BONUS_APPLIANCE_MATCH
         reasons.append(f"matches default appliance {default_app} (+{_BONUS_APPLIANCE_MATCH})")
+
+    # Planning feedback (never relaxed) — what actually happened to this
+    # recipe in recent proposals and kitchens.
+    fb = (feedback or {}).get(rid) or {}
+    swaps = int(fb.get("swapped_out") or 0)
+    if swaps:
+        pen = max(_SWAPPED_OUT_FLOOR, swaps * _PENALTY_SWAPPED_OUT)
+        score += pen
+        reasons.append(f"swapped out of {swaps} recent proposal(s) ({pen})")
+    if int(fb.get("made_it") or 0):
+        score += _BONUS_MADE_IT
+        reasons.append(f"cooked as written recently (+{_BONUS_MADE_IT})")
+    if int(fb.get("made_changes") or 0):
+        score += _PENALTY_MADE_CHANGES
+        reasons.append(f"needed changes when cooked ({_PENALTY_MADE_CHANGES})")
 
     return Evaluation(
         eligible=True,
