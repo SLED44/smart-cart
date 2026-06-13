@@ -24,6 +24,7 @@ def render():
                     st.error("APP_PASSWORD is not set in your .env file / Streamlit secrets.")
                 elif password == app_password:
                     st.session_state.authenticated = True
-                    go("home")
+                    # Land on the meal planner — it's the daily-use entry point.
+                    go("mealplan_home")
                 else:
                     st.error("Incorrect password.")
