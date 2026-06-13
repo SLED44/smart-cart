@@ -72,8 +72,7 @@ def render():
     _render_top_bar()
     _render_hero(recipe, household_size, original_servings)
     _render_notes_callout(recipe)
-    _recipe_view.render_ingredients(recipe, scale)
-    _recipe_view.render_instructions(recipe)
+    _render_cook_body(rid, recipe, scale)
     st.divider()
     _render_rating(rid, recipe, rules)
     st.divider()
@@ -129,6 +128,104 @@ def _render_notes_callout(recipe: dict):
     if not notes:
         return
     st.warning(f"📝 **Your notes**\n\n{notes}")
+
+
+# ---------------------------------------------------------------------------
+# Cooking body — two columns: check-off ingredients + active-step instructions
+# ---------------------------------------------------------------------------
+
+# Common words too generic to anchor a step→ingredient highlight match.
+_HIGHLIGHT_STOP = {"oil", "salt", "water", "sugar", "pepper", "butter", "broth"}
+
+
+def _step_uses_ingredient(step_text: str, ing: dict) -> bool:
+    """Lightweight match: does this step mention this ingredient? Full name
+    substring, or the head noun (≥4 chars, not a generic pantry word)."""
+    name = (ing.get("name") or "").lower().strip()
+    if not name:
+        return False
+    text = step_text.lower()
+    if name in text:
+        return True
+    head = name.split()[-1] if name.split() else ""
+    return len(head) >= 4 and head not in _HIGHLIGHT_STOP and head in text
+
+
+def _render_cook_body(rid: str, recipe: dict, scale: float):
+    steps = recipe.get("instructions") or []
+    active = int(st.session_state.get(f"cook_step_{rid}", 0) or 0)
+    if active > len(steps):
+        active = 0
+    active_text = steps[active - 1].get("text", "") if 1 <= active <= len(steps) else ""
+
+    col_ing, col_steps = st.columns([1, 1.3])
+    with col_ing:
+        _render_cook_ingredients(rid, recipe, scale, active, active_text)
+    with col_steps:
+        _render_cook_steps(rid, steps, active)
+
+
+def _render_cook_ingredients(rid: str, recipe: dict, scale: float,
+                             active: int, active_text: str):
+    ings = recipe.get("ingredients") or []
+    total = len(ings)
+    checked = sum(1 for i in range(total) if st.session_state.get(f"cook_ck_{rid}_{i}"))
+
+    st.subheader(f"Ingredients · {checked} of {total} in")
+    if active:
+        st.caption(f"Highlighted ingredients are used in step {active}.")
+    else:
+        st.caption("Tap to check off as you add them.")
+
+    # Group preserving each ingredient's original index (stable checkbox keys).
+    groups: dict[str, list] = {}
+    for i, ing in enumerate(ings):
+        groups.setdefault((ing.get("group") or "").strip(), []).append((i, ing))
+
+    for group_name, items in groups.items():
+        if group_name:
+            st.markdown(f"**{group_name}**")
+        for i, ing in items:
+            line = _recipe_view.format_ingredient_line(ing, scale)
+            if active_text and _step_uses_ingredient(active_text, ing):
+                line = f"👉 **{line}**"
+            st.checkbox(line, key=f"cook_ck_{rid}_{i}")
+
+
+def _render_cook_steps(rid: str, steps: list, active: int):
+    n = len(steps)
+    step_key = f"cook_step_{rid}"
+    st.subheader(f"Step {active} of {n}" if active else f"Instructions · {n} steps")
+
+    col_prev, col_next, col_clear = st.columns(3)
+    with col_prev:
+        if st.button("← Prev", key="cook_step_prev", use_container_width=True,
+                     disabled=active <= 1):
+            st.session_state[step_key] = max(1, active - 1)
+            st.rerun()
+    with col_next:
+        if st.button("Next →", key="cook_step_next", use_container_width=True,
+                     disabled=active >= n):
+            st.session_state[step_key] = (active + 1) if active else 1
+            st.rerun()
+    with col_clear:
+        if st.button("Clear", key="cook_step_clear", use_container_width=True,
+                     disabled=not active):
+            st.session_state[step_key] = 0
+            st.rerun()
+
+    for step in steps:
+        num = step.get("step_number", "?")
+        text = step.get("text", "")
+        is_active = num == active
+        with st.container(border=True):
+            if is_active:
+                st.success(f"**{num}.** {text}")
+            else:
+                st.markdown(f"**{num}.** {text}")
+                if st.button("▶ Cook this step", key=f"cook_step_set_{num}"):
+                    st.session_state[step_key] = num
+                    st.rerun()
 
 
 # ---------------------------------------------------------------------------
