@@ -28,6 +28,7 @@ from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
 from screens import _recipe_view
+from sc_design import reason_chips
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_HISTORY = "meal_plan_history"
@@ -238,7 +239,14 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                 st.caption(f"📝 _{recipe['user_notes'][:120]}_")
             if cand.source == "spoonacular":
                 st.caption("✨ fresh from Spoonacular")
-            with st.expander(f"Score: {cand.score:.0f}"):
+            # Friendly reason chips vs. the rest of the lineup (minus this slot).
+            others = [library.get(m.get("recipe_id")) for i, m in enumerate(meals)
+                      if i != slot_index and m.get("recipe_id")]
+            others = [r for r in others if r]
+            chips = _recipe_view.recipe_reasons(recipe, others, rules)
+            if chips:
+                st.html(reason_chips(chips))
+            with st.expander(f"Scoring detail · {cand.score:.0f}"):
                 for r in cand.reasons:
                     st.caption(f"• {r}")
                 for r in (cand.relaxations_applied or []):

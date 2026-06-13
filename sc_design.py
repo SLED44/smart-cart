@@ -85,6 +85,33 @@ def match_badge(match_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Reason chips — small pastel pills shown under a recipe title on the
+# propose/swap cards ("🆕 New to your rotation", "Adds Greek to the week").
+# tone: "neutral" (default), "green" (favorite/loved), "amber" (rating).
+# ---------------------------------------------------------------------------
+
+def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
+    """Render a row of reason chips. Each item is either a plain string
+    (neutral) or a (text, tone) tuple. Render with st.html()."""
+    tones = {
+        "neutral": (P["bg_soft"],    P["fg"],        P["border_soft"]),
+        "green":   ("oklch(97% 0.03 150)", P["green_900"], "oklch(87% 0.11 150)"),
+        "amber":   (P["amber_50"],   "#b58100",      P["amber_300"]),
+    }
+    pills = []
+    for item in reasons:
+        text, tone = item if isinstance(item, tuple) else (item, "neutral")
+        bg, fg, bd = tones.get(tone, tones["neutral"])
+        pills.append(
+            f'<span style="display:inline-block; font-size:12px; font-weight:600; '
+            f'color:{fg}; background:{bg}; border:1px solid {bd}; '
+            f'border-radius:999px; padding:3px 10px; margin:0 6px 6px 0; '
+            f'white-space:nowrap;">{text}</span>'
+        )
+    return f'<div style="margin:6px 0 2px; line-height:1.9;">{"".join(pills)}</div>'
+
+
+# ---------------------------------------------------------------------------
 # Stat card — home screen three-up. Each tile is a tone-coloured pastel
 # block with a glyph chip in the corner.
 # ---------------------------------------------------------------------------

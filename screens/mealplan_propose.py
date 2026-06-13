@@ -34,6 +34,7 @@ from supabase_kv import kv_delete, kv_get, kv_put
 
 from screens._shared import go
 from screens import _recipe_view
+from sc_design import reason_chips
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_CURRENT_PLAN = "current_plan"
@@ -76,9 +77,11 @@ def render():
 
     st.divider()
 
-    # Slot cards
+    # Slot cards — resolve the other recipes in the lineup for reason chips.
+    lineup_recipes = [library.get(m.get("recipe_id")) for m in meals if m.get("recipe_id")]
+    lineup_recipes = [r for r in lineup_recipes if r]
     for slot in meals:
-        _render_slot_card(slot, rules)
+        _render_slot_card(slot, lineup_recipes, rules)
 
 
 # ---------------------------------------------------------------------------
@@ -186,7 +189,7 @@ def _reroll(n: int, rules: dict, current_meals: list[dict]):
 # Per-slot card
 # ---------------------------------------------------------------------------
 
-def _render_slot_card(slot: dict, rules: dict):
+def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict):
     rid = slot.get("recipe_id")
     recipe = library.get(rid) if rid else None
 
@@ -212,15 +215,16 @@ def _render_slot_card(slot: dict, rules: dict):
                     meta_bits.append(f"· {recipe['ready_in_minutes']} min")
                 if meta_bits:
                     st.caption(" ".join(meta_bits))
-                if recipe.get("last_cooked_at"):
-                    st.caption(f"last cooked: {recipe['last_cooked_at'][:10]}")
-                else:
-                    st.caption("never cooked yet")
-                if slot.get("added_via") == "favorite":
-                    st.caption("⭐ favorite — auto-included")
-                if slot.get("reasons"):
-                    with st.expander("Why this one?"):
-                        for r in slot["reasons"]:
+                # Friendly reason chips (favorite / loved / new / balances…),
+                # computed against the rest of the lineup.
+                others = [r for r in lineup_recipes if r.get("id") != rid]
+                chips = _recipe_view.recipe_reasons(recipe, others, rules)
+                if chips:
+                    st.html(reason_chips(chips))
+                # Raw scoring detail stays available but tucked away.
+                if slot.get("reasons") or slot.get("relaxations"):
+                    with st.expander("Scoring detail"):
+                        for r in slot.get("reasons") or []:
                             st.caption(f"• {r}")
                         for r in (slot.get("relaxations") or []):
                             st.caption(f"⚙ {r}")

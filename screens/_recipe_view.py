@@ -137,3 +137,51 @@ def render_recipe_detail(recipe: dict, scale: float = 1.0):
 def open_preview(recipe: dict, scale: float = 1.0):
     """Open the recipe in a modal over the current page."""
     render_recipe_detail(recipe, scale)
+
+
+# ---------------------------------------------------------------------------
+# Friendly reason chips (propose / swap cards)
+# ---------------------------------------------------------------------------
+
+def _is_favorite(recipe: dict, rules: dict) -> bool:
+    rid = recipe.get("id")
+    if recipe.get("status") == "favorite":
+        return True
+    return any(f.get("recipe_id") == rid for f in (rules.get("favorites") or []))
+
+
+def _star_str(n: int) -> str:
+    return "★" * n + "☆" * (5 - n)
+
+
+def recipe_reasons(recipe: dict, others: list[dict], rules: dict) -> list[tuple[str, str]]:
+    """User-facing reason chips for why a recipe fits the week, mirroring the
+    design hand-off. Returns up to 3 (text, tone) tuples. Distinct from the
+    planner's internal scoring reasons (which carry point values)."""
+    out: list[tuple[str, str]] = []
+    rating = recipe.get("rating") or 0
+
+    if _is_favorite(recipe, rules):
+        out.append(("⭐ Favorite — auto-included", "green"))
+    if rating >= 4:
+        out.append((f"{_star_str(rating)} you loved this", "amber"))
+    elif rating and rating <= 2:
+        out.append((f"{_star_str(rating)} — included anyway", "amber"))
+
+    if not recipe.get("last_cooked_at"):
+        out.append(("🆕 New to your rotation", "neutral"))
+
+    other_cuisines = {c.lower() for o in others for c in (o.get("cuisines") or [])}
+    my_cuisines = [c for c in (recipe.get("cuisines") or [])]
+    if my_cuisines and my_cuisines[0].lower() not in other_cuisines:
+        out.append((f"Adds {my_cuisines[0].title()} to the week", "neutral"))
+
+    other_proteins = {p.lower() for o in others for p in (o.get("proteins") or [])}
+    my_proteins = recipe.get("proteins") or []
+    if my_proteins and not any(p.lower() in other_proteins for p in my_proteins):
+        out.append((f"{my_proteins[0].title()} — balances proteins", "neutral"))
+
+    if recipe.get("last_cooked_at"):
+        out.append((f"Last made {recipe['last_cooked_at'][:10]}", "neutral"))
+
+    return out[:3]
