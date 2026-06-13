@@ -104,6 +104,13 @@ Set `status=retired` (they stay in the KV blob and can be restored — nothing i
 
 16 keep + 39 regenerated = **55 active recipes**, all serves-4, grouped ingredients, real instructions. Gaps to fill with *new* sourced recipes: **american and italian thin out after cuts** (the anchors that must appear weekly) — suggest 4–6 new sourced recipes each there, picked together from NYT/Serious Eats; plus 1–2 proven fish dishes since the salmon cuts leave fish light.
 
+> **EXECUTED 2026-06-12.** Dispositions applied (38 retired, 55 active) and all
+> three regeneration waves are live — `wave1_recipes.py` (5), `wave2a/2b_recipes.py`
+> (23), `wave3_recipes.py` (11). `regen_pending` = 0. 45/55 active recipes carry
+> source_url provenance; 49/55 are serves-4 (the exceptions are untouched KEEPs).
+> Remaining: anchor-cuisine additions (american/italian) + proven fish — pick
+> with the user.
+
 ## Execution plan
 
 1. **Apply dispositions** — one script, backup first: cuts → `status=retired` (new status; planner + swap pools exclude it). Regen-list recipes **stay active** with a `regen_pending` flag — pulling 39 recipes from rotation before replacements exist would starve the planner; each regenerated recipe overwrites in place (same id, cooked-history preserved by `library.save`'s merge).
