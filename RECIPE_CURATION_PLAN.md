@@ -102,7 +102,7 @@ Set `status=retired` (they stay in the KV blob and can be restored — nothing i
 
 ## End state & gaps
 
-16 keep + 39 regenerated = **55 active recipes**, all serves-4, grouped ingredients, real instructions. Gaps to fill with *new* sourced recipes: **american and italian thin out after cuts** (the anchors that must appear weekly) — suggest 4–6 new sourced recipes each there, picked together from NYT/Serious Eats; plus 1–2 proven fish dishes since the salmon cuts leave fish light.
+16 keep + 39 regenerated = 55 → **Wave 4 added 23 user-picked recipes = 78 active** (2026-06-12), all serves-4, grouped ingredients, real instructions. Anchor gaps closed: american 13, mexican 11, italian 9; fish now 7. New per cuisine — American 4, Italian 4, Mexican 5, Korean 3, Thai 4, Fish 3. All enter unproven (74/78 active have times_cooked 0): no scoring bonus until first "Made it," so duds fade on their own. 19/23 carry source_url provenance (RecipeTin Eats, Budget Bytes, The Mediterranean Dish, Maangchi, etc.); the 4 blanks were classics with no single canonical source to cite honestly.
 
 > **EXECUTED 2026-06-12.** Dispositions applied (38 retired, 55 active) and all
 > three regeneration waves are live — `wave1_recipes.py` (5), `wave2a/2b_recipes.py`
