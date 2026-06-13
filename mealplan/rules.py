@@ -104,6 +104,12 @@ _SWAPPED_OUT_FLOOR = -50     # …capped here so one bad month isn't a death sen
 _PENALTY_MADE_CHANGES = -10  # cooked, but needed tweaks — mild demotion
 _BONUS_MADE_IT = 15          # cooked as written — gentle promotion
 
+# Star rating (1-5) is a durable verdict stored on the recipe (not windowed
+# like the event-log signals above). Added 2026-06 with the cooking-mode
+# rating UI. 5★ floats a dish up the rotation; 1-2★ pushes it down without
+# excluding it (that's what "never again" is for).
+_RATING_SCORE = {5: 22, 4: 12, 3: 0, 2: -18, 1: -30}
+
 _BASE_SCORE = 100.0
 
 
@@ -494,6 +500,14 @@ def evaluate_candidate(
     if int(fb.get("made_changes") or 0):
         score += _PENALTY_MADE_CHANGES
         reasons.append(f"needed changes when cooked ({_PENALTY_MADE_CHANGES})")
+
+    # Star rating (durable; never relaxed).
+    rating = recipe.get("rating")
+    if rating in _RATING_SCORE and _RATING_SCORE[rating]:
+        delta = _RATING_SCORE[rating]
+        score += delta
+        verb = "loved" if rating >= 4 else "rated low"
+        reasons.append(f"you {verb} this — {rating}★ ({delta:+d})")
 
     return Evaluation(
         eligible=True,

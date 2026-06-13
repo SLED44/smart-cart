@@ -22,10 +22,15 @@ from mealplan.event_log import (
     EVT_RECIPE_CHANGED,
     EVT_RECIPE_COOKED,
     EVT_RECIPE_NEVER_AGAIN,
+    EVT_RECIPE_RATED,
     log_event,
 )
 from mealplan.rules import load_rules, save_rules
 from mealplan.swap import mark_never_again
+
+# Favorite cadence applied when you favorite from the cook screen (mirrors
+# the paste-recipe screen). [due_week, force_week].
+_DEFAULT_FAV_CADENCE = [4, 6]
 
 from screens._shared import go
 from screens import _recipe_view
@@ -69,6 +74,8 @@ def render():
     _render_notes_callout(recipe)
     _recipe_view.render_ingredients(recipe, scale)
     _recipe_view.render_instructions(recipe)
+    st.divider()
+    _render_rating(rid, recipe, rules)
     st.divider()
     _render_action_buttons(rid, recipe, rules)
 
@@ -122,6 +129,76 @@ def _render_notes_callout(recipe: dict):
     if not notes:
         return
     st.warning(f"📝 **Your notes**\n\n{notes}")
+
+
+# ---------------------------------------------------------------------------
+# Star rating + favorite toggle
+# ---------------------------------------------------------------------------
+
+def _is_favorite(rid: str, rules: dict) -> bool:
+    return any(f.get("recipe_id") == rid for f in (rules.get("favorites") or []))
+
+
+def _toggle_favorite(rid: str, recipe: dict, rules: dict):
+    """Add/remove the recipe from rules.favorites (with default cadence) and
+    mirror its library status. Returns the new favorite state."""
+    favs = list(rules.get("favorites") or [])
+    if _is_favorite(rid, rules):
+        favs = [f for f in favs if f.get("recipe_id") != rid]
+        new_state = False
+        # Only drop the status back to active if it was the favorite marker.
+        if recipe.get("status") == "favorite":
+            library.set_status(rid, "active")
+    else:
+        favs.append({"recipe_id": rid, "cadence_weeks": list(_DEFAULT_FAV_CADENCE),
+                     "last_used_week": None})
+        new_state = True
+        if recipe.get("status") == "active":
+            library.set_status(rid, "favorite")
+    rules["favorites"] = favs
+    save_rules(rules)
+    return new_state
+
+
+def _render_rating(rid: str, recipe: dict, rules: dict):
+    current = recipe.get("rating")
+    if current:
+        st.subheader(f"You rated this {current}/5")
+    else:
+        st.subheader("How was tonight's dinner?")
+        st.caption("4–5★ bumps it up your rotation · 1–2★ makes it rarer "
+                   "(that's different from “never again”).")
+
+    # Five star buttons in a row. Filled up to the current rating.
+    cols = st.columns(11)
+    for i in range(1, 6):
+        with cols[i - 1]:
+            filled = current and i <= current
+            if st.button("★" if filled else "☆", key=f"cook_star_{i}",
+                         help=f"{i} star{'s' if i > 1 else ''}"):
+                library.set_rating(rid, i)
+                log_event(EVT_RECIPE_RATED, {
+                    "recipe_id": rid, "title": recipe.get("title", ""), "stars": i,
+                })
+                st.session_state[_FLASH_KEY] = f"Rated {i}/5 — noted for next week's plan."
+                st.rerun()
+
+    if current:
+        if st.button("Clear rating", key="cook_rating_clear"):
+            library.set_rating(rid, None)
+            st.rerun()
+
+    # Favorite toggle: surfaced for high ratings or recipes already favorited.
+    is_fav = _is_favorite(rid, rules)
+    if (current and current >= 4) or is_fav:
+        label = "★ In your favorites — tap to remove" if is_fav else "☆ Add to favorites"
+        if st.button(label, key="cook_fav_toggle"):
+            now_fav = _toggle_favorite(rid, recipe, rules)
+            st.session_state[_FLASH_KEY] = (
+                "Added to favorites — it'll come around on its cadence."
+                if now_fav else "Removed from favorites."
+            )
+            st.rerun()
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,8 @@ _PROTECTED_FIELDS = (
     "last_cooked_at",
     "status",
     "added_at",
+    "rating",       # 1-5 star rating (None = unrated); durable, survives regen
+    "rated_at",
 )
 
 # Status values, per PRD §7.2 (+ "retired", added 2026-06-12 for library
@@ -205,6 +207,8 @@ def _default_for(field: str):
         "last_cooked_at":  None,
         "status":          STATUS_ACTIVE,
         "added_at":        None,
+        "rating":          None,
+        "rated_at":        None,
     }[field]
 
 
@@ -230,6 +234,21 @@ def set_status(recipe_id: str, status: str) -> bool:
     if recipe_id not in library:
         return False
     library[recipe_id]["status"] = status
+    _put_all(library)
+    return True
+
+
+def set_rating(recipe_id: str, stars: int | None) -> bool:
+    """Set (1-5) or clear (None) a recipe's star rating. Stamps rated_at.
+    Returns False if the recipe is missing or stars is out of range."""
+    if stars is not None and stars not in (1, 2, 3, 4, 5):
+        raise ValueError(f"stars must be 1-5 or None, got {stars!r}")
+    library = get_all()
+    if recipe_id not in library:
+        return False
+    r = library[recipe_id]
+    r["rating"] = stars
+    r["rated_at"] = _now_iso() if stars is not None else None
     _put_all(library)
     return True
 
