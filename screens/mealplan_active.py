@@ -16,6 +16,7 @@ from mealplan.rules import load_rules
 from supabase_kv import kv_get, kv_put
 
 from screens._shared import clear_review_widget_state, go
+from screens import _recipe_view
 from applog import get_logger, log_items
 
 _log = get_logger(__name__)
@@ -189,10 +190,16 @@ def _render_meal_card(i: int, slot: dict):
                     meta.append(f"· {recipe['ready_in_minutes']} min")
                 if meta:
                     st.caption(" ".join(meta))
-                if slot.get("added_via"):
-                    st.caption(f"added via: {slot['added_via']}")
+                # Note line: rating · cooked count · how it got here.
+                note = []
+                if recipe.get("rating"):
+                    note.append(_recipe_view.star_str(recipe["rating"]))
                 if recipe.get("times_cooked"):
-                    st.caption(f"cooked {recipe['times_cooked']} time(s)")
+                    note.append(f"Cooked {recipe['times_cooked']}×")
+                if slot.get("added_via"):
+                    note.append(f"added via {slot['added_via']}")
+                if note:
+                    st.caption(" · ".join(note))
             else:
                 st.markdown(f"### {i+1}. _(missing recipe `{rid}`)_")
                 st.caption("Recipe was deleted from the library after this plan was confirmed.")

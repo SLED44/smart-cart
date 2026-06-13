@@ -118,6 +118,8 @@ def render_recipe_detail(recipe: dict, scale: float = 1.0):
         meta_bits.append(f"· {recipe['ready_in_minutes']} min")
     if recipe.get("servings_original"):
         meta_bits.append(f"· serves {recipe['servings_original']}")
+    if recipe.get("rating"):
+        meta_bits.append(f"·  {star_str(recipe['rating'])}")
     if meta_bits:
         st.caption(" ".join(meta_bits))
     if recipe.get("equipment"):
@@ -150,8 +152,12 @@ def _is_favorite(recipe: dict, rules: dict) -> bool:
     return any(f.get("recipe_id") == rid for f in (rules.get("favorites") or []))
 
 
-def _star_str(n: int) -> str:
+def star_str(n: int) -> str:
+    """'★★★★☆' for a 1-5 rating."""
     return "★" * n + "☆" * (5 - n)
+
+
+_star_str = star_str  # internal alias
 
 
 def recipe_reasons(recipe: dict, others: list[dict], rules: dict) -> list[tuple[str, str]]:
