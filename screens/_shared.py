@@ -72,16 +72,8 @@ def render_tab_bar():
     if screen == "login":
         return
     cur = current_tab()
-    col_groc, col_meal = st.columns(2)
-    with col_groc:
-        if st.button(
-            "🛍  Grocery",
-            type="primary" if cur == TAB_GROCERY else "secondary",
-            use_container_width=True,
-            key="tabbar_grocery",
-        ):
-            if cur != TAB_GROCERY:
-                go(TAB_HOME[TAB_GROCERY])
+    # Meal Planner on the left — it's the daily-use entry point; Grocery right.
+    col_meal, col_groc = st.columns(2)
     with col_meal:
         if st.button(
             "🍳  Meal Planner",
@@ -91,6 +83,15 @@ def render_tab_bar():
         ):
             if cur != TAB_MEALPLAN:
                 go(TAB_HOME[TAB_MEALPLAN])
+    with col_groc:
+        if st.button(
+            "🛍  Grocery",
+            type="primary" if cur == TAB_GROCERY else "secondary",
+            use_container_width=True,
+            key="tabbar_grocery",
+        ):
+            if cur != TAB_GROCERY:
+                go(TAB_HOME[TAB_GROCERY])
 
 
 def go(screen: str):
