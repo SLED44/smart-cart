@@ -28,6 +28,7 @@ from mealplan.rules import load_rules, save_rules
 from mealplan.swap import mark_never_again
 
 from screens._shared import go
+from screens import _recipe_view
 
 _RECIPE_KEY = "mealplan_cook_recipe_id"
 _NOTES_EDIT_KEY = "mealplan_cook_notes_edit_open"
@@ -66,8 +67,8 @@ def render():
     _render_top_bar()
     _render_hero(recipe, household_size, original_servings)
     _render_notes_callout(recipe)
-    _render_ingredients(recipe, scale)
-    _render_instructions(recipe)
+    _recipe_view.render_ingredients(recipe, scale)
+    _recipe_view.render_instructions(recipe)
     st.divider()
     _render_action_buttons(rid, recipe, rules)
 
@@ -121,62 +122,6 @@ def _render_notes_callout(recipe: dict):
     if not notes:
         return
     st.warning(f"📝 **Your notes**\n\n{notes}")
-
-
-def _render_ingredients(recipe: dict, scale: float):
-    st.subheader("Ingredients")
-    st.caption(f"Scaled to your household ({scale:.2g}× recipe yield)" if scale != 1.0
-               else "At recipe's original yield")
-    # Group by component ("Sauce", "For serving", ...) preserving first-seen
-    # order; ingredients without a group render first, unlabelled. Recipes
-    # with flat ingredient lists look exactly as before.
-    grouped: dict[str, list] = {}
-    for ing in recipe.get("ingredients") or []:
-        grouped.setdefault((ing.get("group") or "").strip(), []).append(ing)
-    for group_name, ings in grouped.items():
-        if group_name:
-            st.markdown(f"**{group_name}**")
-        for ing in ings:
-            st.write(f"• {_format_ingredient_line(ing, scale)}")
-
-
-def _format_ingredient_line(ing: dict, scale: float) -> str:
-    """One amount, one unit per line. The old renderer printed the scaled
-    decimal AND original_text ('**0.67** lb chow mein noodles (16 ounces
-    (454 gram) package...)') — two or three units per ingredient.
-
-    Rules:
-    - Spoonacular 'servings'-unit rows are amountless placeholders (to-taste
-      items and section headers leaked into the list) → no fake amount.
-    - Unscaled recipe + original_text present → show original_text verbatim
-      (natural phrasing, e.g. '1 1/2 tablespoons soy sauce').
-    - Scaled → kitchen-fraction amount + unit + name; original_text is
-      omitted because its numbers contradict the scaled ones.
-    """
-    name = ing.get("name") or "(unknown)"
-    unit = (ing.get("unit") or "").strip()
-    original = (ing.get("original_text") or "").strip()
-
-    if unit.lower() in ("serving", "servings"):
-        return original if original else f"{name} — to taste / as needed"
-
-    if scale == 1.0 and original:
-        return original
-
-    scaled_amount = float(ing.get("amount") or 0) * scale
-    amount_str = _fmt_amount(scaled_amount)
-    if not scaled_amount:
-        return original or name
-    return f"**{amount_str}** {unit} {name}".replace("  ", " ")
-
-
-def _render_instructions(recipe: dict):
-    steps = recipe.get("instructions") or []
-    if not steps:
-        return
-    st.subheader("Instructions")
-    for step in steps:
-        st.write(f"**{step.get('step_number','?')}.** {step.get('text','')}")
 
 
 # ---------------------------------------------------------------------------
@@ -292,24 +237,6 @@ def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-_KITCHEN_FRACTIONS = (
-    (0.125, "⅛"), (0.25, "¼"), (0.333, "⅓"), (0.375, "⅜"), (0.5, "½"),
-    (0.625, "⅝"), (0.667, "⅔"), (0.75, "¾"), (0.875, "⅞"),
-)
-
-
-def _fmt_amount(q: float) -> str:
-    """Kitchen-friendly amounts: 0.67 → '⅔', 2.5 → '2½', 0.171 → '0.17'."""
-    if q == int(q):
-        return str(int(q))
-    whole = int(q)
-    frac = q - whole
-    for value, glyph in _KITCHEN_FRACTIONS:
-        if abs(frac - value) <= 0.04:
-            return f"{whole}{glyph}" if whole else glyph
-    return f"{q:.2f}".rstrip("0").rstrip(".")
-
 
 def _clear_session():
     """Reset the cook-screen ephemeral state. Recipe id stays — it's set

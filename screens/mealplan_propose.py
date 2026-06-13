@@ -33,6 +33,7 @@ from mealplan.rules import bump_state_after_confirm, load_rules, save_rules
 from supabase_kv import kv_delete, kv_get, kv_put
 
 from screens._shared import go
+from screens import _recipe_view
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_CURRENT_PLAN = "current_plan"
@@ -77,7 +78,7 @@ def render():
 
     # Slot cards
     for slot in meals:
-        _render_slot_card(slot)
+        _render_slot_card(slot, rules)
 
 
 # ---------------------------------------------------------------------------
@@ -185,7 +186,7 @@ def _reroll(n: int, rules: dict, current_meals: list[dict]):
 # Per-slot card
 # ---------------------------------------------------------------------------
 
-def _render_slot_card(slot: dict):
+def _render_slot_card(slot: dict, rules: dict):
     rid = slot.get("recipe_id")
     recipe = library.get(rid) if rid else None
 
@@ -228,7 +229,11 @@ def _render_slot_card(slot: dict):
                 st.caption("Pick something via Replace →")
 
         with col_actions:
-            if st.button("Replace", key=f"mp_propose_replace_{slot['slot']}"):
+            if recipe and st.button("Preview", key=f"mp_propose_preview_{slot['slot']}",
+                                    use_container_width=True):
+                _recipe_view.open_preview(recipe, _recipe_view.compute_scale(recipe, rules))
+            if st.button("Replace", key=f"mp_propose_replace_{slot['slot']}",
+                         use_container_width=True):
                 st.session_state.mealplan_swap_slot_index = slot["slot"]
                 go("mealplan_swap")
 

@@ -27,6 +27,7 @@ _log = get_logger(__name__)
 from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
+from screens import _recipe_view
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_HISTORY = "meal_plan_history"
@@ -243,6 +244,9 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                 for r in (cand.relaxations_applied or []):
                     st.caption(f"⚙ {r}")
         with col_actions:
+            if st.button("Preview", key=f"mp_swap_preview_{rid}",
+                         use_container_width=True):
+                _recipe_view.open_preview(recipe, _recipe_view.compute_scale(recipe, rules))
             if st.button("Pick", type="primary", key=f"mp_swap_pick_{rid}",
                          use_container_width=True):
                 _apply_pick(rid, slot_index, meals, pending, source=cand.source)
