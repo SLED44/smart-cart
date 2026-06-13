@@ -41,12 +41,15 @@ _PROTECTED_FIELDS = (
     "added_at",
 )
 
-# Status values, per PRD §7.2
+# Status values, per PRD §7.2 (+ "retired", added 2026-06-12 for library
+# curation: out of rotation like never_again, but means "cut for fit/quality,
+# restorable" rather than "user hated it" — keeps dietitian stats honest).
 STATUS_ACTIVE = "active"
 STATUS_FAVORITE = "favorite"
 STATUS_NEVER_AGAIN = "never_again"
+STATUS_RETIRED = "retired"
 
-VALID_STATUSES = (STATUS_ACTIVE, STATUS_FAVORITE, STATUS_NEVER_AGAIN)
+VALID_STATUSES = (STATUS_ACTIVE, STATUS_FAVORITE, STATUS_NEVER_AGAIN, STATUS_RETIRED)
 
 
 def _now_iso() -> str:
@@ -250,10 +253,11 @@ def record_cooked(recipe_id: str, notes: str | None = None) -> bool:
 # ---------------------------------------------------------------------------
 
 def all_active() -> list[dict]:
-    """All recipes the planner is allowed to consider (excludes never_again)."""
+    """All recipes the planner is allowed to consider (excludes never_again
+    and retired)."""
     return [
         r for r in get_all().values()
-        if r.get("status") != STATUS_NEVER_AGAIN
+        if r.get("status") not in (STATUS_NEVER_AGAIN, STATUS_RETIRED)
     ]
 
 

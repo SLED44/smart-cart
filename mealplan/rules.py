@@ -338,8 +338,8 @@ def evaluate_candidate(
     excl = set(rules.get("exclusions") or [])
     if rid in excl:
         return Evaluation(False, rejection_reason="in exclusions")
-    if recipe.get("status") == "never_again":
-        return Evaluation(False, rejection_reason="status=never_again")
+    if recipe.get("status") in ("never_again", "retired"):
+        return Evaluation(False, rejection_reason=f"status={recipe.get('status')}")
 
     for pair in rules.get("pair_exclusions") or []:
         if len(pair) != 2:
