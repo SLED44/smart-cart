@@ -94,7 +94,16 @@ Quantity rules — read carefully:
   Keep the container's form word in the item name per the rule above.
   Example: "2 cans diced tomatoes" -> item_name: "Canned Diced Tomatoes", quantity: 2, unit: "can"
   Example: "1 jar marinara" -> item_name: "Marinara Sauce", quantity: 1, unit: "jar"
-- For items sold by COUNT (eggs, apples, fillets, portions, pieces, heads):
+- For PORTIONS of a package — where the number counts pieces that come many
+  to one package/bunch/head, so you still only buy ONE: strips/slices/rashers
+  (bacon), slices (bread, cheese), cloves (garlic), sprigs (herbs), stalks or
+  ribs (celery), leaves. Set quantity = 1, unit = "", and put the portion
+  count in notes. Never turn "2 strips" into 2 packages.
+  Example: "2 strips of bacon" -> item_name: "Bacon", quantity: 1, unit: "", notes: "2 strips"
+  Example: "3 cloves garlic" -> item_name: "Garlic", quantity: 1, unit: "", notes: "3 cloves"
+  Example: "4 slices bread" -> item_name: "Bread", quantity: 1, unit: "", notes: "4 slices"
+- For items sold by COUNT — whole pieces you actually buy individually (eggs,
+  apples, bananas, salmon fillets, heads of lettuce, avocados):
   quantity = the count number, unit = "count"
   Example: "4 salmon fillets" -> quantity: 4, unit: "count"
   If no number is given for a count item, quantity = 1 (never guess a larger number).
