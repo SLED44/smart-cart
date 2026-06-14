@@ -165,7 +165,12 @@ def _render_current_plan_section(current: dict):
     with col_new:
         if st.button("🔄 Plan a new week (replaces current)",
                      use_container_width=True, key="mph_replan"):
-            go("mealplan_propose")  # propose will see no pending → generate fresh
+            # propose only generates when this flag is set; without it (and with
+            # no pending lineup) it dead-ends on "No plan in progress". Plan the
+            # same number of meals as the current week.
+            st.session_state.mealplan_propose_n = len(current.get("meals") or []) or 5
+            st.session_state.mealplan_propose_fresh = True
+            go("mealplan_propose")
 
 
 def _render_settings_expander(summary: dict):
