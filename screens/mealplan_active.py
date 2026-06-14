@@ -127,6 +127,13 @@ def _hand_off_to_smartcart(plan: dict):
     go("home")
 
 
+# Recipe ingredients counted in sub-units of a whole-sold item. Recipes store
+# e.g. garlic as unit "count" (the number is cloves), so the plain count would
+# read as whole heads — "12 garlic" → 12 bulbs. Re-attach the portion word so
+# the list parser collapses it to one item ("12 cloves garlic" → 1 head).
+_COUNT_PORTION = {"garlic": "cloves"}
+
+
 def _items_to_text(items: list[dict]) -> str:
     """Render aggregated grocery items as one editable line each, e.g.
     '2.5 lb chicken wings' or '8 celery'. Count/serving/blank units are
@@ -146,7 +153,9 @@ def _items_to_text(items: list[dict]) -> str:
         qty = it.get("quantity")
         unit = (it.get("unit") or "").strip().lower()
         if unit in ("count", "serving", "servings"):
-            unit = ""
+            # Re-attach a portion word for sub-unit-counted items (garlic →
+            # cloves); otherwise drop the placeholder unit.
+            unit = _COUNT_PORTION.get(name.lower(), "")
         key = name.lower()
         if key not in merged:
             merged[key] = {"name": name, "qty": qty, "unit": unit}
