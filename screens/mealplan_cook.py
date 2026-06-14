@@ -188,7 +188,9 @@ def _render_cook_ingredients(rid: str, recipe: dict, scale: float,
         for i, ing in items:
             line = _recipe_view.format_ingredient_line(ing, scale)
             if active_text and _step_uses_ingredient(active_text, ing):
-                line = f"👉 **{line}**"
+                # Scaled lines already contain '**amount**'; don't re-wrap in
+                # bold (that yields malformed markdown). Bold only plain lines.
+                line = f"👉 {line}" if "**" in line else f"👉 **{line}**"
             st.checkbox(line, key=f"cook_ck_{rid}_{i}")
 
 
@@ -214,17 +216,21 @@ def _render_cook_steps(rid: str, steps: list, active: int):
             st.session_state[step_key] = 0
             st.rerun()
 
-    for step in steps:
-        num = step.get("step_number", "?")
+    # Identify the active step by 1-based position (matches steps[active-1] in
+    # _render_cook_body), not by step_number — step_number may be missing or
+    # duplicated, which would collide widget keys and break the position math.
+    for idx, step in enumerate(steps):
+        pos = idx + 1
+        num = step.get("step_number", pos)  # display label; fall back to position
         text = step.get("text", "")
-        is_active = num == active
+        is_active = pos == active
         with st.container(border=True):
             if is_active:
                 st.success(f"**{num}.** {text}")
             else:
                 st.markdown(f"**{num}.** {text}")
-                if st.button("▶ Cook this step", key=f"cook_step_set_{num}"):
-                    st.session_state[step_key] = num
+                if st.button("▶ Cook this step", key=f"cook_step_set_{idx}"):
+                    st.session_state[step_key] = pos
                     st.rerun()
 
 
@@ -232,15 +238,11 @@ def _render_cook_steps(rid: str, steps: list, active: int):
 # Star rating + favorite toggle
 # ---------------------------------------------------------------------------
 
-def _is_favorite(rid: str, rules: dict) -> bool:
-    return any(f.get("recipe_id") == rid for f in (rules.get("favorites") or []))
-
-
 def _toggle_favorite(rid: str, recipe: dict, rules: dict):
     """Add/remove the recipe from rules.favorites (with default cadence) and
     mirror its library status. Returns the new favorite state."""
     favs = list(rules.get("favorites") or [])
-    if _is_favorite(rid, rules):
+    if _recipe_view.is_favorite(recipe, rules):
         favs = [f for f in favs if f.get("recipe_id") != rid]
         new_state = False
         # Only drop the status back to active if it was the favorite marker.
@@ -286,7 +288,7 @@ def _render_rating(rid: str, recipe: dict, rules: dict):
             st.rerun()
 
     # Favorite toggle: surfaced for high ratings or recipes already favorited.
-    is_fav = _is_favorite(rid, rules)
+    is_fav = _recipe_view.is_favorite(recipe, rules)
     if (current and current >= 4) or is_fav:
         label = "★ In your favorites — tap to remove" if is_fav else "☆ Add to favorites"
         if st.button(label, key="cook_fav_toggle"):

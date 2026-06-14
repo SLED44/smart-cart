@@ -145,7 +145,10 @@ def open_preview(recipe: dict, scale: float = 1.0):
 # Friendly reason chips (propose / swap cards)
 # ---------------------------------------------------------------------------
 
-def _is_favorite(recipe: dict, rules: dict) -> bool:
+def is_favorite(recipe: dict, rules: dict) -> bool:
+    """Single source of truth for favorite-ness: either the library status
+    marker or membership in rules.favorites. Used by the reason chips and the
+    cook-screen favorite toggle so they can't disagree."""
     rid = recipe.get("id")
     if recipe.get("status") == "favorite":
         return True
@@ -167,7 +170,7 @@ def recipe_reasons(recipe: dict, others: list[dict], rules: dict) -> list[tuple[
     out: list[tuple[str, str]] = []
     rating = recipe.get("rating") or 0
 
-    if _is_favorite(recipe, rules):
+    if is_favorite(recipe, rules):
         out.append(("⭐ Favorite — auto-included", "green"))
     if rating >= 4:
         out.append((f"{_star_str(rating)} you loved this", "amber"))
