@@ -59,8 +59,12 @@ def render():
         go("mealplan_propose")
         return
 
+    # One library fetch for the whole render — library.get() is a full KV
+    # round-trip, and this screen resolves recipes for the current pick, the
+    # lineup, and every candidate card's reason chips.
+    lib = library.get_all()
     current_slot = meals[slot_index]
-    current_recipe = library.get(current_slot.get("recipe_id")) if current_slot.get("recipe_id") else None
+    current_recipe = lib.get(current_slot.get("recipe_id")) if current_slot.get("recipe_id") else None
 
     st.title(f"🔁 Replace slot {slot_index + 1}")
     if current_recipe:
@@ -87,7 +91,7 @@ def render():
     current_lineup = []
     for m in meals:
         rid = m.get("recipe_id")
-        r = library.get(rid) if rid else None
+        r = lib.get(rid) if rid else None
         current_lineup.append(r if r else {})
 
     with st.spinner("Finding candidates…"):
@@ -133,7 +137,7 @@ def render():
               ", ".join(f"{s['title']}({s['score']:.0f})" for s in shown))
 
     for cand in result.candidates:
-        _render_candidate_card(cand, slot_index, meals, pending, rules)
+        _render_candidate_card(cand, slot_index, meals, pending, rules, lib)
 
 
 # ---------------------------------------------------------------------------
@@ -209,7 +213,7 @@ def _render_action_bar(result):
 # Candidate card
 # ---------------------------------------------------------------------------
 
-def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: dict, rules: dict):
+def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: dict, rules: dict, lib: dict):
     recipe = cand.recipe
     rid = recipe.get("id", "")
 
@@ -240,7 +244,7 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
             if cand.source == "spoonacular":
                 st.caption("✨ fresh from Spoonacular")
             # Friendly reason chips vs. the rest of the lineup (minus this slot).
-            others = [library.get(m.get("recipe_id")) for i, m in enumerate(meals)
+            others = [lib.get(m.get("recipe_id")) for i, m in enumerate(meals)
                       if i != slot_index and m.get("recipe_id")]
             others = [r for r in others if r]
             chips = _recipe_view.recipe_reasons(recipe, others, rules)

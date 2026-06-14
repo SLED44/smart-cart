@@ -72,16 +72,21 @@ def render():
 
     st.caption(f"{sum(1 for m in meals if m.get('recipe_id'))} / {n} slots filled")
 
+    # Fetch the library once per render and index into it — library.get() is a
+    # full KV round-trip, and this screen resolves the same recipes several
+    # times (why-panel + reason chips + each slot card).
+    lib = library.get_all()
+
     # "Why these picks?" — recompute lineup_meta from current recipes
-    _render_why_panel(meals, rules)
+    _render_why_panel(meals, rules, lib)
 
     st.divider()
 
     # Slot cards — resolve the other recipes in the lineup for reason chips.
-    lineup_recipes = [library.get(m.get("recipe_id")) for m in meals if m.get("recipe_id")]
+    lineup_recipes = [lib.get(m.get("recipe_id")) for m in meals if m.get("recipe_id")]
     lineup_recipes = [r for r in lineup_recipes if r]
     for slot in meals:
-        _render_slot_card(slot, lineup_recipes, rules)
+        _render_slot_card(slot, lineup_recipes, rules, lib)
 
 
 # ---------------------------------------------------------------------------
@@ -189,9 +194,9 @@ def _reroll(n: int, rules: dict, current_meals: list[dict]):
 # Per-slot card
 # ---------------------------------------------------------------------------
 
-def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict):
+def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: dict):
     rid = slot.get("recipe_id")
-    recipe = library.get(rid) if rid else None
+    recipe = lib.get(rid) if rid else None
 
     with st.container(border=True):
         col_img, col_body, col_actions = st.columns([1, 4, 1])
@@ -246,7 +251,7 @@ def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict):
 # Why these picks? panel
 # ---------------------------------------------------------------------------
 
-def _render_why_panel(meals: list[dict], rules: dict):
+def _render_why_panel(meals: list[dict], rules: dict, lib: dict):
     # Reconstruct a LineupResult-like object from the persisted slots so we
     # can call lineup_meta. We only need recipes + relaxation_level; the
     # other fields don't influence the meta aggregates.
@@ -255,7 +260,7 @@ def _render_why_panel(meals: list[dict], rules: dict):
     recipes = []
     slots: list[SlotResult] = []
     for m in meals:
-        r = library.get(m.get("recipe_id")) if m.get("recipe_id") else None
+        r = lib.get(m.get("recipe_id")) if m.get("recipe_id") else None
         if not r:
             continue
         recipes.append(r)
@@ -324,9 +329,10 @@ def _render_why_panel(meals: list[dict], rules: dict):
 # ---------------------------------------------------------------------------
 
 def _confirm(meals: list[dict], rules: dict):
+    lib = library.get_all()  # one fetch; reused for recipes + telemetry titles
     recipes = []
     for m in meals:
-        r = library.get(m.get("recipe_id")) if m.get("recipe_id") else None
+        r = lib.get(m.get("recipe_id")) if m.get("recipe_id") else None
         if r:
             recipes.append(r)
     if len(recipes) != len(meals):
@@ -365,7 +371,7 @@ def _confirm(meals: list[dict], rules: dict):
         "week_number": week_number,
         "meals": [
             {"recipe_id": m["recipe_id"],
-             "title":     library.get(m["recipe_id"]).get("title") if library.get(m["recipe_id"]) else "",
+             "title":     (lib.get(m["recipe_id"]) or {}).get("title", ""),
              "added_via": m.get("added_via", "proposal")}
             for m in meals
         ],
