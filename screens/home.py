@@ -132,7 +132,7 @@ def render():
                         )
                         st.session_state.staple_selections[key] = checked
                     with col_qty:
-                        qty_val = st.number_input(
+                        st.number_input(
                             "qty",
                             min_value=1,
                             value=int(s.get("default_quantity", 1)),
@@ -140,7 +140,10 @@ def render():
                             key=f"staple_qty_{key}",
                             label_visibility="collapsed"
                         )
-                        s["session_quantity"] = qty_val
+                        # The edited value lives in session_state under this
+                        # widget key; the submit handler reads it from there.
+                        # (Don't stash on `s` — it's a throwaway dict re-fetched
+                        # fresh on submit, so the value would be lost.)
 
             selected_count = sum(1 for v in st.session_state.staple_selections.values() if v)
             st.session_state.staples_added = selected_count > 0
@@ -182,7 +185,11 @@ def render():
                 if not selections.get(key, True):
                     continue
                 if key not in existing_keys:
-                    qty = float(staple.get("session_quantity") or staple.get("default_quantity", 1))
+                    # Read the qty the user set in the expander (held under the
+                    # number_input's widget key), falling back to the saved
+                    # default if they never opened the expander / touched it.
+                    qty = float(st.session_state.get(f"staple_qty_{key}")
+                                or staple.get("default_quantity", 1))
                     items.append({
                         "item_name":      staple["display_name"],
                         "item_key":       key,

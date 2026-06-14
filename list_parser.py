@@ -74,14 +74,31 @@ Rules:
 - If no category is given for an item, infer the most likely one from the item name
 - Normalise item names to title case, singular form, without brand names
   (brand preferences are stored separately — just the generic item name)
+- KEEP form/preparation words that change WHICH product to buy in the item
+  name itself — the item name is used verbatim as the store search term, so
+  dropping these returns the wrong product. These include: canned, jarred,
+  frozen, dried, fresh, ground, shredded, crushed, diced, sliced, smoked,
+  whole, low-sodium. Do NOT move them to notes.
+  Example: "1 can diced tomatoes" -> item_name: "Canned Diced Tomatoes"
+  Example: "frozen peas" -> item_name: "Frozen Peas"
+  Example: "fresh basil" -> item_name: "Fresh Basil" (vs. "Dried Basil")
+  By contrast, qualifiers that do NOT change the search go in notes:
+  organic, low-fat, boneless, skinless, extra-large, ripe, unsalted.
 - If an item is ambiguous or unclear, still include it and add a note in "warnings"
 - Do not add items that were not in the original list
 - Do not merge items that appear to be distinct (e.g. "red onion" and "yellow onion" stay separate)
 
 Quantity rules — read carefully:
-- For items sold by COUNT (eggs, apples, cans, bags, bottles, fillets, portions, pieces):
-  quantity = the count number, unit = "" or "count"
+- For items sold in CONTAINERS (cans, jars, bottles, bags, boxes, cartons):
+  quantity = the number of containers, unit = the container word (singular).
+  Keep the container's form word in the item name per the rule above.
+  Example: "2 cans diced tomatoes" -> item_name: "Canned Diced Tomatoes", quantity: 2, unit: "can"
+  Example: "1 jar marinara" -> item_name: "Marinara Sauce", quantity: 1, unit: "jar"
+- For items sold by COUNT (eggs, apples, fillets, portions, pieces, heads):
+  quantity = the count number, unit = "count"
   Example: "4 salmon fillets" -> quantity: 4, unit: "count"
+  If no number is given for a count item, quantity = 1 (never guess a larger number).
+  Example: "tomatoes" -> quantity: 1, unit: "count"; "bananas" -> quantity: 1, unit: "count"
 - For items sold by WEIGHT at the deli or butcher (ground beef, chicken breast, pork tenderloin, steak):
   quantity = 1, unit = "", notes must include the weight e.g. "1.5 lbs"
   Example: "1.5 lbs pork tenderloin" -> quantity: 1, unit: "", notes: "1.5 lbs"
