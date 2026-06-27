@@ -47,6 +47,18 @@ def fmt_amount(q: float) -> str:
     return f"{q:.2f}".rstrip("0").rstrip(".")
 
 
+# Units that describe a whole, indivisible purchase item. Scaling these to a
+# fraction ("0.8 count tomatoes", "1.6 cans beans") reads as nonsense — you buy
+# whole cans / onions / limes. For these we round to a sensible whole number
+# (min 1) and, when rounding lands back on the original count, fall back to the
+# original_text phrasing (which also carries can sizes and the word "canned").
+_DISCRETE_UNITS = {
+    "count", "can", "cans", "clove", "cloves", "package", "packages", "pkg",
+    "stick", "sticks", "head", "heads", "slice", "slices", "loaf", "loaves",
+    "ear", "ears", "sprig", "sprigs", "bunch", "bunches",
+}
+
+
 def format_ingredient_line(ing: dict, scale: float) -> str:
     """One amount, one unit per line.
 
@@ -54,7 +66,11 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
       items, leaked section headers) → no fake amount.
     - Unscaled recipe + original_text present → show original_text verbatim
       (natural phrasing, e.g. '1 1/2 tablespoons soy sauce').
-    - Scaled → kitchen-fraction amount + unit + name; original_text is
+    - Discrete whole-item units (cans, cloves, count, …) → round the scaled
+      amount to a whole number (min 1) instead of showing a fractional can.
+      When the rounded count equals the original whole count, show original_text
+      so the can size / "canned" wording survives.
+    - Otherwise scaled → kitchen-fraction amount + unit + name; original_text is
       omitted because its numbers contradict the scaled ones.
     """
     name = ing.get("name") or "(unknown)"
@@ -67,10 +83,26 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
     if scale == 1.0 and original:
         return original
 
-    scaled_amount = float(ing.get("amount") or 0) * scale
-    amount_str = fmt_amount(scaled_amount)
+    raw_amount = float(ing.get("amount") or 0)
+    scaled_amount = raw_amount * scale
     if not scaled_amount:
         return original or name
+
+    if unit.lower() in _DISCRETE_UNITS:
+        whole = max(1, round(scaled_amount))
+        # Scaling didn't change the whole-item count → original phrasing is
+        # clearest (keeps "(28-oz) can", "drained", etc.). The parser sometimes
+        # strips the food name out of original_text ("1 (28-oz) can" + name
+        # "tomatoes"), so re-attach the name when it's missing.
+        if original and whole == max(1, round(raw_amount)):
+            if name.lower() not in original.lower():
+                return f"{name} — {original}"
+            return original
+        # "count" is an internal placeholder, not a word a cook wants to read.
+        unit_word = "" if unit.lower() == "count" else unit
+        return f"**{whole}** {unit_word} {name}".replace("  ", " ").strip()
+
+    amount_str = fmt_amount(scaled_amount)
     return f"**{amount_str}** {unit} {name}".replace("  ", " ")
 
 

@@ -508,10 +508,67 @@ def planner_tests(t: _T):
 # Entry point
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Ingredient rendering / scaling tests (screens/_recipe_view.py)
+# ---------------------------------------------------------------------------
+
+def recipe_view_tests(t: _T):
+    from screens._recipe_view import format_ingredient_line
+
+    can_tomato = {
+        "amount": 1, "unit": "count", "name": "whole peeled tomatoes",
+        "original_text": "1 (28-oz) can",
+    }
+    cans_beans = {
+        "amount": 2, "unit": "count", "name": "cannellini beans",
+        "original_text": "2 (15-oz) cans, drained",
+    }
+    cloves = {
+        "amount": 4, "unit": "count", "name": "garlic",
+        "original_text": "4 garlic cloves, thinly sliced",
+    }
+
+    @t.case("scaling down a can never shows a fractional can")
+    def _():
+        # 0.8x is the live household case (size 4 / serves 5).
+        line = format_ingredient_line(can_tomato, 0.8)
+        assert "0.8" not in line and "count" not in line, line
+        # original phrasing (with size + 'can') survives, name re-attached
+        assert "can" in line and "tomatoes" in line, line
+
+    @t.case("scaling down rounds whole-item count back to original, not a fraction")
+    def _():
+        line = format_ingredient_line(cans_beans, 0.8)
+        assert "1.6" not in line, line
+        assert "2 (15-oz) cans" in line and "cannellini beans" in line, line
+
+    @t.case("scaling up multiplies discrete units to a whole number")
+    def _():
+        assert format_ingredient_line(cans_beans, 2.0).strip() == "**4** cannellini beans"
+        assert format_ingredient_line(can_tomato, 3.0).strip() == "**3** whole peeled tomatoes"
+
+    @t.case("'count' placeholder unit is never shown to the cook")
+    def _():
+        # 4 cloves * 0.8 = 3.2 -> 3 (count changed, so no original fallback)
+        line = format_ingredient_line(cloves, 0.8)
+        assert line.strip() == "**3** garlic", line
+
+    @t.case("non-discrete units still scale with kitchen fractions")
+    def _():
+        broth = {"amount": 4, "unit": "cup", "name": "chicken broth",
+                 "original_text": "4 cup chicken broth"}
+        assert format_ingredient_line(broth, 0.5).strip() == "**2** cup chicken broth"
+
+    @t.case("unscaled recipe shows original_text verbatim")
+    def _():
+        assert format_ingredient_line(can_tomato, 1.0) == "1 (28-oz) can"
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
     planner_tests(t)
+    recipe_view_tests(t)
     return t.summary()
 
 
