@@ -340,3 +340,118 @@ def _placeholder_box(size: int = 56) -> str:
         f'border:1px solid {P["border_soft"]}; display:flex; '
         f'align-items:center; justify-content:center; font-size:{size//2}px;">📦</div>'
     )
+
+
+# ---------------------------------------------------------------------------
+# RecipeArt — deterministic generated graphic for recipes with no image_url.
+# A cuisine-tinted tile with a white "plate" and the dish glyph; at larger
+# sizes a plate ring, a faint steam mark, and hashed garnish dots. Same
+# (glyph, cuisine) → identical art every time (handoff §"Recipe Art").
+# ---------------------------------------------------------------------------
+
+# Each palette = (tile bg, plate ring, accent) in the same oklch family as the
+# design tokens. Distinct hues so a week of meals reads as varied at a glance.
+_ART_PALETTES = {
+    "coral": ("oklch(93% 0.07 25)",  "oklch(80% 0.12 25)",  "oklch(55% 0.18 25)"),
+    "sky":   ("oklch(94% 0.05 220)", "oklch(80% 0.10 220)", "oklch(54% 0.14 235)"),
+    "amber": ("oklch(95% 0.06 78)",  "oklch(82% 0.13 75)",  "oklch(58% 0.16 50)"),
+    "grape": ("oklch(94% 0.05 305)", "oklch(82% 0.10 305)", "oklch(50% 0.16 305)"),
+    "green": ("oklch(93% 0.07 150)", "oklch(82% 0.11 150)", "oklch(63% 0.18 148)"),
+    "teal":  ("oklch(93% 0.06 190)", "oklch(80% 0.10 190)", "oklch(52% 0.13 195)"),
+}
+
+# Named cuisines → palette key. Anything else hashes onto one of the six below.
+_CUISINE_PALETTE = {
+    "chinese": "coral",
+    "greek": "sky",
+    "indian": "amber",
+    "moroccan": "grape",
+    "mexican": "green",
+    "middle eastern": "teal",
+}
+
+_ART_ORDER = ("coral", "sky", "amber", "grape", "green", "teal")
+
+
+def _art_hash(s: str) -> int:
+    """Stable, process-independent hash (Python's hash() is salted per run)."""
+    import hashlib
+    return int(hashlib.md5(s.encode("utf-8")).hexdigest()[:8], 16)
+
+
+def _art_palette_key(cuisine: str, glyph: str) -> str:
+    key = (cuisine or "").strip().lower()
+    if key in _CUISINE_PALETTE:
+        return _CUISINE_PALETTE[key]
+    # Unknown / multi cuisine → deterministic bucket from glyph+cuisine.
+    return _ART_ORDER[_art_hash(f"{glyph}|{key}") % len(_ART_ORDER)]
+
+
+def recipe_art(glyph: str = "🍽", cuisine: str = "", size: int = 54) -> str:
+    """Return an inline SVG string: a cuisine-tinted plate placeholder for a
+    recipe with no photo. Render with st.html(). Flat (no gradients), per the
+    design system. Larger sizes add a plate ring, a faint steam mark, and
+    hashed garnish dots so the header art feels intentional."""
+    glyph = glyph or "🍽"
+    bg, ring, accent = _ART_PALETTES[_art_palette_key(cuisine, glyph)]
+    s = size
+    cx = cy = s / 2
+    plate_r = s * 0.36
+    radius = s * 0.18
+    big = s >= 72
+
+    parts = [
+        f'<svg width="{s}" height="{s}" viewBox="0 0 {s} {s}" '
+        f'xmlns="http://www.w3.org/2000/svg" role="img" '
+        f'style="display:block; border-radius:{radius:.1f}px;">',
+        f'<rect x="0" y="0" width="{s}" height="{s}" rx="{radius:.1f}" fill="{bg}"/>',
+    ]
+
+    if big:
+        # Steam mark — a faint ♨-style double wisp above the plate.
+        sw = max(1.0, s * 0.018)
+        y0 = cy - plate_r - s * 0.04
+        for dx in (-s * 0.07, s * 0.07):
+            x = cx + dx
+            parts.append(
+                f'<path d="M {x:.1f} {y0:.1f} q {s*0.05:.1f} {-s*0.05:.1f} 0 {-s*0.10:.1f} '
+                f'q {-s*0.05:.1f} {-s*0.05:.1f} 0 {-s*0.10:.1f}" '
+                f'fill="none" stroke="{accent}" stroke-width="{sw:.1f}" '
+                f'stroke-linecap="round" opacity="0.28"/>'
+            )
+
+    # White plate (with ring at larger sizes).
+    ring_w = max(1.0, s * 0.03)
+    parts.append(
+        f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{plate_r:.1f}" fill="#ffffff" '
+        + (f'stroke="{ring}" stroke-width="{ring_w:.1f}"/>' if big else '/>')
+    )
+    if big:
+        # Inset plate ring.
+        parts.append(
+            f'<circle cx="{cx:.1f}" cy="{cy:.1f}" r="{plate_r*0.72:.1f}" '
+            f'fill="none" stroke="{ring}" stroke-width="{max(1.0, s*0.012):.1f}" '
+            f'opacity="0.5"/>'
+        )
+        # 4–6 garnish dots placed by a hash of glyph+cuisine.
+        h = _art_hash(f"{cuisine}|{glyph}|garnish")
+        n_dots = 4 + (h % 3)  # 4..6
+        import math
+        for i in range(n_dots):
+            a = (h >> (i * 3)) % 360
+            rad = plate_r * (0.78 + ((h >> (i * 2)) % 10) / 50.0)  # 0.78..0.96
+            dx = math.cos(math.radians(a)) * rad
+            dy = math.sin(math.radians(a)) * rad
+            dot_r = s * (0.018 + ((h >> i) % 3) * 0.006)
+            parts.append(
+                f'<circle cx="{cx+dx:.1f}" cy="{cy+dy:.1f}" r="{dot_r:.1f}" '
+                f'fill="{accent}" opacity="0.55"/>'
+            )
+
+    # Dish glyph, centered on the plate.
+    parts.append(
+        f'<text x="{cx:.1f}" y="{cy:.1f}" text-anchor="middle" '
+        f'dominant-baseline="central" font-size="{s*0.42:.1f}">{glyph}</text>'
+    )
+    parts.append('</svg>')
+    return "".join(parts)

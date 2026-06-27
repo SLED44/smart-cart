@@ -16,6 +16,7 @@ Ingredients display scaled to household.size (read from rules).
 from datetime import datetime, timezone
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 from mealplan import library
 from mealplan.event_log import (
@@ -34,6 +35,8 @@ _DEFAULT_FAV_CADENCE = [4, 6]
 
 from screens._shared import go
 from screens import _recipe_view
+from screens._cook_pane import build_cook_pane, PANE_HEIGHT
+from sc_design import recipe_art
 
 _RECIPE_KEY = "mealplan_cook_recipe_id"
 _NOTES_EDIT_KEY = "mealplan_cook_notes_edit_open"
@@ -97,7 +100,9 @@ def _render_hero(recipe: dict, household_size: int, original_servings: int):
         if recipe.get("image_url"):
             st.image(recipe["image_url"], use_container_width=True)
         else:
-            st.caption("(no image)")
+            # Generated cuisine-tinted plate placeholder (handoff RecipeArt).
+            cuisine = (recipe.get("cuisines") or [""])[0]
+            st.html(recipe_art(recipe.get("glyph", "🍽"), cuisine, size=160))
     with col_body:
         st.title(recipe.get("title", "(untitled)"))
         if recipe.get("cuisines"):
@@ -131,107 +136,22 @@ def _render_notes_callout(recipe: dict):
 
 
 # ---------------------------------------------------------------------------
-# Cooking body — two columns: check-off ingredients + active-step instructions
+# Cooking body — two INDEPENDENTLY-SCROLLING columns (ingredients | steps),
+# rendered as an embedded HTML/JS pane so the panes scroll separately and the
+# check-off / active-step / highlight interactions stay client-side (persisted
+# to localStorage, so they survive Streamlit reruns). See screens/_cook_pane.py.
 # ---------------------------------------------------------------------------
-
-# Common words too generic to anchor a step→ingredient highlight match.
-_HIGHLIGHT_STOP = {"oil", "salt", "water", "sugar", "pepper", "butter", "broth"}
-
-
-def _step_uses_ingredient(step_text: str, ing: dict) -> bool:
-    """Lightweight match: does this step mention this ingredient? Full name
-    substring, or the head noun (≥4 chars, not a generic pantry word)."""
-    name = (ing.get("name") or "").lower().strip()
-    if not name:
-        return False
-    text = step_text.lower()
-    if name in text:
-        return True
-    head = name.split()[-1] if name.split() else ""
-    return len(head) >= 4 and head not in _HIGHLIGHT_STOP and head in text
-
 
 def _render_cook_body(rid: str, recipe: dict, scale: float):
     steps = recipe.get("instructions") or []
-    active = int(st.session_state.get(f"cook_step_{rid}", 0) or 0)
-    if active > len(steps):
-        active = 0
-    active_text = steps[active - 1].get("text", "") if 1 <= active <= len(steps) else ""
-
-    col_ing, col_steps = st.columns([1, 1.3])
-    with col_ing:
-        _render_cook_ingredients(rid, recipe, scale, active, active_text)
-    with col_steps:
-        _render_cook_steps(rid, steps, active)
-
-
-def _render_cook_ingredients(rid: str, recipe: dict, scale: float,
-                             active: int, active_text: str):
-    ings = recipe.get("ingredients") or []
-    total = len(ings)
-    checked = sum(1 for i in range(total) if st.session_state.get(f"cook_ck_{rid}_{i}"))
-
-    st.subheader(f"Ingredients · {checked} of {total} in")
-    if active:
-        st.caption(f"Highlighted ingredients are used in step {active}.")
-    else:
-        st.caption("Tap to check off as you add them.")
-
-    # Group preserving each ingredient's original index (stable checkbox keys).
-    groups: dict[str, list] = {}
-    for i, ing in enumerate(ings):
-        groups.setdefault((ing.get("group") or "").strip(), []).append((i, ing))
-
-    for group_name, items in groups.items():
-        if group_name:
-            st.markdown(f"**{group_name}**")
-        for i, ing in items:
-            line = _recipe_view.format_ingredient_line(ing, scale)
-            if active_text and _step_uses_ingredient(active_text, ing):
-                # Scaled lines already contain '**amount**'; don't re-wrap in
-                # bold (that yields malformed markdown). Bold only plain lines.
-                line = f"👉 {line}" if "**" in line else f"👉 **{line}**"
-            st.checkbox(line, key=f"cook_ck_{rid}_{i}")
-
-
-def _render_cook_steps(rid: str, steps: list, active: int):
-    n = len(steps)
-    step_key = f"cook_step_{rid}"
-    st.subheader(f"Step {active} of {n}" if active else f"Instructions · {n} steps")
-
-    col_prev, col_next, col_clear = st.columns(3)
-    with col_prev:
-        if st.button("← Prev", key="cook_step_prev", use_container_width=True,
-                     disabled=active <= 1):
-            st.session_state[step_key] = max(1, active - 1)
-            st.rerun()
-    with col_next:
-        if st.button("Next →", key="cook_step_next", use_container_width=True,
-                     disabled=active >= n):
-            st.session_state[step_key] = (active + 1) if active else 1
-            st.rerun()
-    with col_clear:
-        if st.button("Clear", key="cook_step_clear", use_container_width=True,
-                     disabled=not active):
-            st.session_state[step_key] = 0
-            st.rerun()
-
-    # Identify the active step by 1-based position (matches steps[active-1] in
-    # _render_cook_body), not by step_number — step_number may be missing or
-    # duplicated, which would collide widget keys and break the position math.
-    for idx, step in enumerate(steps):
-        pos = idx + 1
-        num = step.get("step_number", pos)  # display label; fall back to position
-        text = step.get("text", "")
-        is_active = pos == active
-        with st.container(border=True):
-            if is_active:
-                st.success(f"**{num}.** {text}")
-            else:
-                st.markdown(f"**{num}.** {text}")
-                if st.button("▶ Cook this step", key=f"cook_step_set_{idx}"):
-                    st.session_state[step_key] = pos
-                    st.rerun()
+    if not (recipe.get("ingredients") or steps):
+        st.caption("No ingredients or steps recorded for this recipe.")
+        return
+    components.html(
+        build_cook_pane(recipe, scale),
+        height=PANE_HEIGHT + 8,  # +8 so the cards' shadow isn't clipped
+        scrolling=False,
+    )
 
 
 # ---------------------------------------------------------------------------
