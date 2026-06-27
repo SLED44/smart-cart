@@ -28,7 +28,28 @@ from supabase_kv import kv_get, kv_put
 
 from screens._shared import go
 from screens import _recipe_view
-from sc_design import reason_chips
+from sc_design import reason_chips, planner_card
+
+
+def _meta_line(recipe: dict) -> str:
+    """'Greek · chicken · 35 min' meta line for a candidate card."""
+    bits = []
+    if recipe.get("cuisines"):
+        bits.append(", ".join(c.title() for c in recipe["cuisines"]))
+    if recipe.get("proteins"):
+        bits.append("/".join(recipe["proteins"]))
+    if recipe.get("ready_in_minutes"):
+        bits.append(f"{recipe['ready_in_minutes']} min")
+    return " · ".join(bits)
+
+
+def _status_chip(recipe: dict) -> tuple[str, str]:
+    """Lead chip on a candidate card: rating stars if rated, else how many
+    times it's been cooked (handoff candidate-card status chip)."""
+    if recipe.get("rating"):
+        return (_recipe_view.star_str(recipe["rating"]), "amber")
+    n = int(recipe.get("times_cooked") or 0)
+    return (f"Cooked {n}×" if n else "Never cooked", "sky")
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_HISTORY = "meal_plan_history"
@@ -218,35 +239,27 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
     rid = recipe.get("id", "")
 
     with st.container(border=True):
-        col_img, col_body, col_actions = st.columns([1, 4, 1])
-        with col_img:
-            _recipe_view.render_thumb(recipe, size=160)
+        col_body, col_actions = st.columns([5, 1])
         with col_body:
-            st.markdown(f"### {recipe.get('title','(untitled)')}")
-            meta_bits = []
-            if recipe.get("cuisines"):
-                meta_bits.append(", ".join(recipe["cuisines"]))
-            if recipe.get("proteins"):
-                meta_bits.append("· " + "/".join(recipe["proteins"]))
-            if recipe.get("ready_in_minutes"):
-                meta_bits.append(f"· {recipe['ready_in_minutes']} min")
-            if meta_bits:
-                st.caption(" ".join(meta_bits))
-            if recipe.get("last_cooked_at"):
-                st.caption(f"last cooked: {recipe['last_cooked_at'][:10]}")
-            else:
-                st.caption("never cooked yet")
-            if recipe.get("user_notes"):
-                st.caption(f"📝 _{recipe['user_notes'][:120]}_")
-            if cand.source == "spoonacular":
-                st.caption("✨ fresh from Spoonacular")
-            # Friendly reason chips vs. the rest of the lineup (minus this slot).
+            # Status chip (rating stars if rated, else cooked-count) leads the
+            # chip row, followed by the fit reasons vs. the rest of the lineup.
             others = [lib.get(m.get("recipe_id")) for i, m in enumerate(meals)
                       if i != slot_index and m.get("recipe_id")]
             others = [r for r in others if r]
-            chips = _recipe_view.recipe_reasons(recipe, others, rules)
-            if chips:
-                st.html(reason_chips(chips))
+            chip_items = [_status_chip(recipe)]
+            chip_items += _recipe_view.recipe_reasons(recipe, others, rules)
+            if cand.source == "spoonacular":
+                chip_items.append(("✨ Fresh from Spoonacular", "neutral"))
+            st.html(planner_card(
+                recipe=recipe,
+                label=(recipe.get("cuisines") or [""])[0].title() or "Candidate",
+                title=recipe.get("title", "(untitled)"),
+                meta=_meta_line(recipe),
+                chips_html=reason_chips(chip_items),
+                favorite=_recipe_view.is_favorite(recipe, rules),
+            ))
+            if recipe.get("user_notes"):
+                st.caption(f"📝 _{recipe['user_notes'][:120]}_")
             with st.expander(f"Scoring detail · {cand.score:.0f}"):
                 for r in cand.reasons:
                     st.caption(f"• {r}")
@@ -260,7 +273,7 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                          use_container_width=True):
                 _apply_pick(rid, slot_index, meals, pending, source=cand.source)
                 return
-            if st.button("Never make", key=f"mp_swap_never_{rid}",
+            if st.button("🚫 Never make", key=f"mp_swap_never_{rid}",
                          use_container_width=True):
                 new_rules = mark_never_again(rid, rules)
                 save_rules(new_rules)

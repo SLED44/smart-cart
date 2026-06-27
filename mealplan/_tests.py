@@ -595,11 +595,67 @@ def recipe_view_tests(t: _T):
         assert format_ingredient_line(can_tomato, 1.0) == "1 (28-oz) can"
 
 
+# ---------------------------------------------------------------------------
+# Grocery optional-add-on tests (mealplan/grocery.py)
+# ---------------------------------------------------------------------------
+
+def grocery_addon_tests(t: _T):
+    from mealplan import grocery
+
+    class _Lib:
+        def __init__(self, recipes): self._r = {r["id"]: r for r in recipes}
+        def get(self, rid): return self._r.get(rid)
+
+    def ing(name, unit, original="", aisle=""):
+        return {"name": name, "unit": unit, "original_text": original or name,
+                "aisle": aisle, "amount": 0}
+
+    recipe = {
+        "id": "r1", "title": "Test Dish", "servings_original": 4,
+        "ingredients": [
+            ing("chicken", "lb", "1 lb chicken", "Meat"),          # real, not an addon
+            ing("side salad", "serving", "Salad", "Produce"),       # offer
+            ing("thyme leaves", "serving", "Fresh thyme leaves for garnish", "Produce"),
+            ing("salt and pepper", "serving", "salt and pepper"),   # noise
+            ing("olive oil", "serving", "Olive oil"),               # noise (staple+modifier)
+            ing("a brush", "serving", "A brush"),                   # noise (equipment)
+        ],
+    }
+    lib = _Lib([recipe])
+
+    @t.case("addon collector offers sides/garnishes, drops staples + equipment")
+    def _():
+        addons = grocery.collect_optional_addons(["r1"], 4, library=lib)
+        names = {a["name"] for a in addons}
+        assert names == {"side salad", "thyme leaves"}, names
+
+    @t.case("real-unit ingredients never appear as add-ons")
+    def _():
+        addons = grocery.collect_optional_addons(["r1"], 4, library=lib)
+        assert all(a["name"] != "chicken" for a in addons)
+
+    @t.case("addon collector de-duplicates across recipes")
+    def _():
+        r2 = dict(recipe, id="r2", title="Other")
+        addons = grocery.collect_optional_addons(["r1", "r2"], 4, library=_Lib([recipe, r2]))
+        assert sum(a["name"] == "side salad" for a in addons) == 1
+
+    @t.case("addon_to_item produces a hand-off-ready SmartCart Item")
+    def _():
+        addons = grocery.collect_optional_addons(["r1"], 4, library=lib)
+        salad = next(a for a in addons if a["name"] == "side salad")
+        item = grocery.addon_to_item(salad)
+        assert item["item_name"] == "side salad"
+        assert item["quantity"] == 1 and item["unit"] == ""
+        assert item["category"] == "Produce" and item["source"] == "meal_plan"
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
     planner_tests(t)
     recipe_view_tests(t)
+    grocery_addon_tests(t)
     return t.summary()
 
 

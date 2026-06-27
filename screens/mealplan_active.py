@@ -17,11 +17,24 @@ from supabase_kv import kv_get, kv_put
 
 from screens._shared import clear_review_widget_state, go
 from screens import _recipe_view
+from sc_design import reason_chips, planner_card
 from applog import get_logger, log_items
 
 _log = get_logger(__name__)
 
 KEY_CURRENT_PLAN = "current_plan"
+
+
+def _meta_line(recipe: dict) -> str:
+    """'Greek · chicken · 35 min' meta line for a meal card."""
+    bits = []
+    if recipe.get("cuisines"):
+        bits.append(", ".join(c.title() for c in recipe["cuisines"]))
+    if recipe.get("proteins"):
+        bits.append("/".join(recipe["proteins"]))
+    if recipe.get("ready_in_minutes"):
+        bits.append(f"{recipe['ready_in_minutes']} min")
+    return " · ".join(bits)
 
 
 def render():
@@ -65,8 +78,9 @@ def render():
     st.divider()
 
     meals = plan.get("meals") or []
+    rules = load_rules()  # one fetch; reused by every card (favorite + scaling)
     for i, slot in enumerate(meals):
-        _render_meal_card(i, slot)
+        _render_meal_card(i, slot, rules)
 
 
 @st.dialog("🛒 Grocery list")
@@ -84,6 +98,7 @@ def _grocery_overlay(plan: dict):
 
     with st.spinner("Merging ingredients across this week's meals…"):
         items = grocery.aggregate_grocery_list(recipe_ids, household_size)
+        addons = grocery.collect_optional_addons(recipe_ids, household_size)
 
     st.caption(f"{len(items)} item{'s' if len(items) != 1 else ''}, merged across "
                f"{len(recipe_ids)} meal{'s' if len(recipe_ids) != 1 else ''}. "
@@ -98,15 +113,46 @@ def _grocery_overlay(plan: dict):
             for it in chunk:
                 st.html(_grocery_line(it))
 
+    # Optional extras — sides, garnishes and "for serving" items the recipes
+    # mention without a quantity. They're dropped from the auto-list; the user
+    # opts the ones they want onto the cart here (the "add a salad?" decision
+    # point). Nothing here ships unless it's ticked.
+    selected_addons = _render_addon_picker(addons)
+
     st.divider()
+    n_add = len(selected_addons)
+    go_label = ("Hand off to SmartCart →"
+                + (f" (+{n_add} extra{'s' if n_add != 1 else ''})" if n_add else ""))
     col_close, col_go = st.columns([1, 2])
     with col_close:
         if st.button("Close", key="mp_groc_close", use_container_width=True):
             st.rerun()  # dismiss the dialog without navigating
     with col_go:
-        if st.button("Hand off to SmartCart →", type="primary",
+        if st.button(go_label, type="primary",
                      use_container_width=True, key="mp_groc_handoff"):
-            _hand_off_to_smartcart(plan, items=items)
+            full = items + [grocery.addon_to_item(a) for a in selected_addons]
+            _hand_off_to_smartcart(plan, items=full)
+
+
+def _render_addon_picker(addons: list[dict]) -> list[dict]:
+    """Opt-in checkboxes for optional sides/garnishes; returns the selected
+    add-on dicts. Selections live in session_state (keyed per row) so they
+    survive the dialog reruns that fire when a box is ticked."""
+    if not addons:
+        return []
+    st.divider()
+    st.markdown("**Optional extras**")
+    st.caption("Sides, garnishes and serving suggestions the recipes mention "
+               "without a quantity. Tick what you want added to the cart.")
+    selected: list[dict] = []
+    for i, a in enumerate(addons):
+        key = f"mp_addon_{a['name'].lower()}_{i}"
+        label = a["display"] if len(a["display"]) <= 60 else a["name"]
+        if a.get("source"):
+            label = f"{label}  ·  _{a['source']}_"
+        if st.checkbox(label, key=key):
+            selected.append(a)
+    return selected
 
 
 def _grocery_line(it: dict) -> str:
@@ -242,44 +288,42 @@ def _items_to_text(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_meal_card(i: int, slot: dict):
+def _render_meal_card(i: int, slot: dict, rules: dict):
     rid = slot.get("recipe_id")
     recipe = library.get(rid) if rid else None
 
     with st.container(border=True):
-        col_img, col_body, col_act = st.columns([1, 4, 1])
-        with col_img:
-            if recipe:
-                _recipe_view.render_thumb(recipe, size=140)
-            else:
-                st.caption("🖼")
+        col_body, col_act = st.columns([5, 1])
         with col_body:
             if recipe:
-                st.markdown(f"### {i+1}. {recipe.get('title','(untitled)')}")
-                meta = []
-                if recipe.get("cuisines"):
-                    meta.append(", ".join(recipe["cuisines"]))
-                if recipe.get("proteins"):
-                    meta.append("· " + "/".join(recipe["proteins"]))
-                if recipe.get("ready_in_minutes"):
-                    meta.append(f"· {recipe['ready_in_minutes']} min")
-                if meta:
-                    st.caption(" ".join(meta))
-                # Note line: rating · cooked count · how it got here.
-                note = []
+                # Note chips: rating · cooked count · how it got here.
+                chips = []
                 if recipe.get("rating"):
-                    note.append(_recipe_view.star_str(recipe["rating"]))
+                    chips.append((_recipe_view.star_str(recipe["rating"]), "amber"))
                 if recipe.get("times_cooked"):
-                    note.append(f"Cooked {recipe['times_cooked']}×")
+                    chips.append((f"Cooked {recipe['times_cooked']}×", "sky"))
                 if slot.get("added_via"):
-                    note.append(f"added via {slot['added_via']}")
-                if note:
-                    st.caption(" · ".join(note))
+                    chips.append((f"added via {slot['added_via']}", "neutral"))
+                st.html(planner_card(
+                    recipe=recipe,
+                    label=f"Meal {i+1}",
+                    title=recipe.get("title", "(untitled)"),
+                    meta=_meta_line(recipe),
+                    chips_html=reason_chips(chips) if chips else "",
+                    favorite=_recipe_view.is_favorite(recipe, rules),
+                ))
             else:
-                st.markdown(f"### {i+1}. _(missing recipe `{rid}`)_")
-                st.caption("Recipe was deleted from the library after this plan was confirmed.")
+                st.html(planner_card(
+                    recipe={}, label=f"Meal {i+1}",
+                    title="(missing recipe)",
+                    meta="Recipe was deleted from the library after this plan was confirmed.",
+                ))
         with col_act:
-            if recipe and st.button("Open", key=f"mp_active_open_{i}",
-                                    use_container_width=True):
+            if recipe and st.button("🍳 Cook →", key=f"mp_active_open_{i}",
+                                    type="primary", use_container_width=True):
                 st.session_state.mealplan_cook_recipe_id = rid
                 go("mealplan_cook")
+            if recipe and st.button("Preview", key=f"mp_active_preview_{i}",
+                                    use_container_width=True):
+                _recipe_view.open_preview(
+                    recipe, _recipe_view.compute_scale(recipe, rules))

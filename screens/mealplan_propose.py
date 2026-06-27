@@ -34,7 +34,19 @@ from supabase_kv import kv_delete, kv_get, kv_put
 
 from screens._shared import go
 from screens import _recipe_view
-from sc_design import reason_chips
+from sc_design import reason_chips, planner_card
+
+
+def _meta_line(recipe: dict) -> str:
+    """'Greek · chicken · 35 min' meta line for a planner card."""
+    bits = []
+    if recipe.get("cuisines"):
+        bits.append(", ".join(c.title() for c in recipe["cuisines"]))
+    if recipe.get("proteins"):
+        bits.append("/".join(recipe["proteins"]))
+    if recipe.get("ready_in_minutes"):
+        bits.append(f"{recipe['ready_in_minutes']} min")
+    return " · ".join(bits)
 
 KEY_PENDING_LINEUP = "pending_lineup"
 KEY_CURRENT_PLAN = "current_plan"
@@ -198,33 +210,25 @@ def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: 
     rid = slot.get("recipe_id")
     recipe = lib.get(rid) if rid else None
 
-    with st.container(border=True):
-        col_img, col_body, col_actions = st.columns([1, 4, 1])
+    slot_label = f"Slot {slot.get('slot', 0) + 1}"
 
-        with col_img:
-            if recipe:
-                _recipe_view.render_thumb(recipe, size=140)
-            else:
-                st.write("📭")
+    with st.container(border=True):
+        col_body, col_actions = st.columns([5, 1])
 
         with col_body:
             if recipe:
-                st.markdown(f"### Slot {slot.get('slot', 0) + 1}: {recipe.get('title','(untitled)')}")
-                meta_bits = []
-                if recipe.get("cuisines"):
-                    meta_bits.append(", ".join(recipe["cuisines"]))
-                if recipe.get("proteins"):
-                    meta_bits.append("· " + "/".join(recipe["proteins"]))
-                if recipe.get("ready_in_minutes"):
-                    meta_bits.append(f"· {recipe['ready_in_minutes']} min")
-                if meta_bits:
-                    st.caption(" ".join(meta_bits))
                 # Friendly reason chips (favorite / loved / new / balances…),
                 # computed against the rest of the lineup.
                 others = [r for r in lineup_recipes if r.get("id") != rid]
                 chips = _recipe_view.recipe_reasons(recipe, others, rules)
-                if chips:
-                    st.html(reason_chips(chips))
+                st.html(planner_card(
+                    recipe=recipe,
+                    label=slot_label,
+                    title=recipe.get("title", "(untitled)"),
+                    meta=_meta_line(recipe),
+                    chips_html=reason_chips(chips) if chips else "",
+                    favorite=_recipe_view.is_favorite(recipe, rules),
+                ))
                 # Raw scoring detail stays available but tucked away.
                 if slot.get("reasons") or slot.get("relaxations"):
                     with st.expander("Scoring detail"):
@@ -233,14 +237,16 @@ def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: 
                         for r in (slot.get("relaxations") or []):
                             st.caption(f"⚙ {r}")
             else:
-                st.markdown(f"### Slot {slot.get('slot', 0) + 1}: _(empty)_")
-                st.caption("Pick something via Replace →")
+                st.html(planner_card(
+                    recipe={}, label=slot_label, title="(empty)",
+                    meta="Pick something via Replace →",
+                ))
 
         with col_actions:
             if recipe and st.button("Preview", key=f"mp_propose_preview_{slot['slot']}",
                                     use_container_width=True):
                 _recipe_view.open_preview(recipe, _recipe_view.compute_scale(recipe, rules))
-            if st.button("Replace", key=f"mp_propose_replace_{slot['slot']}",
+            if st.button("Replace ⇄", key=f"mp_propose_replace_{slot['slot']}",
                          use_container_width=True):
                 st.session_state.mealplan_swap_slot_index = slot["slot"]
                 go("mealplan_swap")

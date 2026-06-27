@@ -245,6 +245,117 @@ def _round_qty(q: float) -> float:
     return round(q, 2)
 
 
+# ---------------------------------------------------------------------------
+# Optional add-ons (the "add a salad?" decision point)
+# ---------------------------------------------------------------------------
+# aggregate_grocery_list() drops every unit="serving"/"servings" row because
+# they're amountless. Most are to-taste staples ("salt and pepper") or section
+# headers, but some are real optional sides and garnishes the cook may want to
+# buy — a side salad, broccoli, fresh herbs. Rather than silently lose those,
+# collect_optional_addons() surfaces them so the grocery overlay can offer them
+# as opt-in checkboxes: nothing reaches the cart unless the user ticks it.
+
+# Equipment / prep-tool words — never a grocery line.
+_ADDON_EQUIPMENT = (
+    "brush", "pan", "skewer", "bamboo", "griddle", "griller", "grill",
+    "stick", "rack", "thermometer", "foil", "parchment", "toothpick",
+)
+# Always-on-hand staples + the modifiers that decorate them. A row is dropped
+# when *every* word is one of these (so "olive oil", "sea salt", "freshly
+# ground pepper" go, but "chili oil" or "salad" stay).
+_ADDON_PANTRY = ("salt", "pepper", "oil", "water")
+_ADDON_MODIFIERS = (
+    "sea", "kosher", "table", "olive", "vegetable", "veg", "extra", "fresh",
+    "freshly", "ground", "virgin", "light", "dark", "black", "white",
+    "cooking", "canola", "and", "to", "taste", "of", "for", "a", "the",
+)
+
+
+def _is_addon_noise(canonical: str) -> bool:
+    """True for rows that aren't worth offering (equipment, pure staples)."""
+    low = canonical.lower()
+    if any(w in low for w in _ADDON_EQUIPMENT):
+        return True
+    tokens = [t for t in re.split(r"[\s,/]+", low) if t]
+    if not tokens:
+        return True
+    return all(
+        any(s in t for s in _ADDON_PANTRY) or t in _ADDON_MODIFIERS
+        for t in tokens
+    )
+
+
+def collect_optional_addons(
+    recipe_ids: list[str],
+    household_size: int,
+    library=None,
+) -> list[dict]:
+    """The amountless ("serving"-unit) rows aggregate_grocery_list() skips,
+    filtered down to plausible optional sides/garnishes and de-duplicated.
+
+    Returns a list of:
+        {
+            "name":      str,   # canonical-ish ingredient name
+            "display":   str,   # original_text for context ("Salad", "...garnish")
+            "aisle":     str,
+            "source":    str,   # recipe title it came from
+            "category":  str,   # SmartCart category (for the eventual Item)
+        }
+
+    The grocery overlay renders these as opt-in checkboxes; addon_to_item()
+    converts the ticked ones into SmartCart Items for the hand-off.
+    """
+    lib = library if library is not None else _library
+    seen: set[str] = set()
+    addons: list[dict] = []
+    for rid in recipe_ids:
+        recipe = lib.get(rid) if hasattr(lib, "get") else lib.get_all().get(rid)
+        if not recipe:
+            continue
+        title = recipe.get("title", rid)
+        for ing in (recipe.get("ingredients") or []):
+            if (ing.get("unit") or "").strip().lower() not in ("serving", "servings"):
+                continue
+            name = (ing.get("name") or "").strip()
+            canon = canonicalize_name(name)
+            if not canon or canon in seen or _is_addon_noise(canon):
+                continue
+            seen.add(canon)
+            display = (ing.get("original_text") or name or canon).strip()
+            display = display.lstrip("•-*▢□● ").strip()  # drop leaked list bullets
+            addons.append({
+                "name":     name or canon,
+                "display":  display,
+                "aisle":    ing.get("aisle") or "",
+                "source":   title,
+                "category": map_aisle_to_category(ing.get("aisle") or ""),
+            })
+    return addons
+
+
+def addon_to_item(addon: dict) -> dict:
+    """Turn a user-selected add-on into a SmartCart Item (qty 1, no unit) so it
+    flows through the same hand-off path as aggregated ingredients."""
+    name = (addon.get("name") or "").strip() or "(unknown)"
+    canon = canonicalize_name(name)
+    item_key = normalise_item_key(canon or name)
+    try:
+        has_pref = get_preference(item_key) is not None
+    except Exception:
+        has_pref = False
+    return {
+        "item_name":      name,
+        "item_key":       item_key,
+        "quantity":       1,
+        "unit":           "",
+        "category":       addon.get("category") or map_aisle_to_category(addon.get("aisle") or ""),
+        "notes":          addon.get("source", ""),
+        "has_preference": has_pref,
+        "source":         "meal_plan",
+        "aisle":          addon.get("aisle", ""),
+    }
+
+
 def _category_sort_key(cat: str) -> int:
     try:
         return _CATEGORY_ORDER.index(cat)

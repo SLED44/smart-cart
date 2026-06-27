@@ -97,6 +97,7 @@ def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
         "neutral": (P["bg_soft"],    P["fg"],        P["border_soft"]),
         "green":   ("oklch(97% 0.03 150)", P["green_900"], "oklch(87% 0.11 150)"),
         "amber":   (P["amber_50"],   "#b58100",      P["amber_300"]),
+        "sky":     ("#dceaf5",       "#2f6f9e",      "oklch(85% 0.08 220)"),
     }
     pills = []
     for item in reasons:
@@ -109,6 +110,57 @@ def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
             f'white-space:nowrap;">{text}</span>'
         )
     return f'<div style="margin:6px 0 2px; line-height:1.9;">{"".join(pills)}</div>'
+
+
+# ---------------------------------------------------------------------------
+# Planner card — the slot / candidate / meal card anatomy from the hand-off:
+# a compact RecipeArt (or photo) tile, a slot-label pill, the title with an
+# optional favorite star, a meta line, and reason chips. The Preview / Replace
+# (etc.) buttons stay as Streamlit widgets in an adjacent column.
+# ---------------------------------------------------------------------------
+
+def recipe_tile_html(recipe: dict, size: int = 54) -> str:
+    """Raw HTML for a recipe's compact tile: the real photo if present, else
+    the generated RecipeArt plate. For embedding inside a card HTML block
+    (use render_thumb() when you want a standalone st.* element instead)."""
+    box = (f'width:{size}px; height:{size}px; flex-shrink:0; border-radius:12px; '
+           f'overflow:hidden; display:flex; align-items:center; justify-content:center;')
+    if recipe and recipe.get("image_url"):
+        import html as _html
+        src = _html.escape(recipe["image_url"])
+        return (f'<div style="{box}"><img src="{src}" alt="" '
+                f'style="width:100%; height:100%; object-fit:cover;"></div>')
+    cuisine = (recipe.get("cuisines") or [""])[0] if recipe else ""
+    glyph = (recipe.get("glyph") or "🍽") if recipe else "🍽"
+    return f'<div style="{box}">{recipe_art(glyph, cuisine, size=size)}</div>'
+
+
+def planner_card(*, recipe: dict, label: str, title: str, meta: str = "",
+                 chips_html: str = "", favorite: bool = False,
+                 tile_size: int = 54) -> str:
+    """Compose the planner card body (tile + pill + title + star + meta +
+    chips) as one HTML block. Render with st.html() inside the card's main
+    column; keep the action buttons in a separate Streamlit column."""
+    import html as _html
+    pill = (
+        f'<span style="display:inline-block; font-size:11px; font-weight:700; '
+        f'text-transform:uppercase; letter-spacing:0.05em; '
+        f'color:{P["green_900"]}; background:oklch(97% 0.03 150); '
+        f'border-radius:999px; padding:2px 9px; margin-bottom:5px;">'
+        f'{_html.escape(label)}</span>'
+    ) if label else ""
+    star = (f'<span style="color:{P["amber_700"]}; margin-left:7px; '
+            f'font-size:15px;">★</span>') if favorite else ""
+    meta_html = (f'<div style="font-size:13px; color:{P["fg_muted"]}; '
+                 f'margin-top:2px;">{_html.escape(meta)}</div>') if meta else ""
+    return (
+        f'<div style="display:flex; gap:14px; align-items:flex-start;">'
+        f'{recipe_tile_html(recipe, tile_size)}'
+        f'<div style="min-width:0; flex:1;">{pill}'
+        f'<div style="font-size:18px; font-weight:700; letter-spacing:-0.01em; '
+        f'color:{P["fg"]};">{_html.escape(title)}{star}</div>'
+        f'{meta_html}{chips_html}</div></div>'
+    )
 
 
 # ---------------------------------------------------------------------------
