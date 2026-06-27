@@ -13,7 +13,7 @@ import streamlit as st
 
 from mealplan import library
 from mealplan.rules import load_rules
-from sc_design import stat_card
+from sc_design import stat_card, plan_banner
 from supabase_kv import kv_delete, kv_get
 
 from screens._shared import go
@@ -120,21 +120,36 @@ def _render_plan_new_section(summary: dict, rules: dict):
         go("mealplan_propose")
 
 
+def _slot_titles(slots: list[dict], lib: dict) -> list[str]:
+    """Resolve a list of plan slots to display titles, indexing a single
+    library snapshot (avoids one KV round-trip per slot)."""
+    out = []
+    for slot in slots:
+        rid = slot.get("recipe_id")
+        recipe = lib.get(rid) if rid else None
+        out.append(recipe["title"] if recipe else f"(missing {rid})")
+    return out
+
+
 def _render_pending_section(pending: dict, rules: dict):
-    st.subheader("You have a plan in progress")
     meals = pending.get("meals") or []
     titles = pending.get("titles") or []
     if meals:
-        st.caption(f"Last touched: {pending.get('updated_at', 'unknown')[:19] if pending.get('updated_at') else ''}")
-        st.write(f"**{len(meals)} slot(s) so far:**")
-        for slot in meals:
-            recipe = library.get(slot.get("recipe_id")) if slot.get("recipe_id") else None
-            label = recipe["title"] if recipe else f"(missing recipe `{slot.get('recipe_id')}`)"
-            st.write(f"  • {label}")
-    elif titles:
-        st.caption("Imported from your rules-doc state. Titles only — no recipe ids yet.")
-        for t in titles:
-            st.write(f"  • {t}")
+        lib = library.get_all()
+        chips = _slot_titles(meals, lib)
+        touched = pending.get("updated_at", "")
+        sub = (f"{len(meals)} slot(s) so far · last touched {touched[:19]}"
+               if touched else f"{len(meals)} slot(s) so far")
+    else:
+        chips = list(titles)
+        sub = "Imported from your rules-doc state — titles only, no recipe ids yet."
+
+    st.html(plan_banner(
+        tone="amber",
+        heading="🟡 You have a plan in progress",
+        subtext=sub,
+        chips=chips,
+    ))
 
     col_resume, col_discard = st.columns([2, 1])
     with col_resume:
@@ -148,14 +163,16 @@ def _render_pending_section(pending: dict, rules: dict):
 
 
 def _render_current_plan_section(current: dict):
-    st.subheader("This week's plan")
     meals = current.get("meals") or []
-    st.caption(f"Confirmed {current.get('confirmed_at', '')[:10] if current.get('confirmed_at') else ''} · "
-               f"week #{current.get('week_number','?')}")
-    for slot in meals:
-        recipe = library.get(slot.get("recipe_id"))
-        label = recipe["title"] if recipe else f"(missing `{slot.get('recipe_id')}`)"
-        st.write(f"  • {label}")
+    lib = library.get_all()
+    confirmed = current.get("confirmed_at", "")
+    st.html(plan_banner(
+        tone="green",
+        heading="✅ This week's plan is set",
+        subtext=f"Week #{current.get('week_number','?')}"
+                + (f" · confirmed {confirmed[:10]}" if confirmed else ""),
+        chips=_slot_titles(meals, lib),
+    ))
 
     col_active, col_new = st.columns(2)
     with col_active:

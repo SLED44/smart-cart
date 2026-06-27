@@ -113,6 +113,43 @@ def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Plan banner — the home-screen pending (amber) / confirmed (green) cards.
+# Renders the colored card with a heading, subtext, and meal-title chips; the
+# action buttons (Resume/Discard, Open/Plan-new) stay as Streamlit widgets
+# rendered directly below the banner.
+# ---------------------------------------------------------------------------
+
+def plan_banner(*, tone: Literal["amber", "green"], heading: str,
+                subtext: str = "", chips: list[str] | None = None) -> str:
+    """Colored home-screen banner card. tone 'amber' = plan in progress,
+    'green' = confirmed plan. Render with st.html(); put the buttons below."""
+    import html as _html
+    bg, bd, fg, chip_bg, chip_bd, chip_fg = {
+        "amber": (P["amber_50"], P["amber_300"], "#7a5300",
+                  "#ffffff", P["amber_300"], "#7a5300"),
+        "green": ("oklch(97% 0.03 150)", "oklch(87% 0.11 150)", P["green_900"],
+                  "#ffffff", "oklch(87% 0.11 150)", P["green_900"]),
+    }[tone]
+    chip_html = ""
+    if chips:
+        pills = "".join(
+            f'<span style="display:inline-block; font-size:12.5px; font-weight:600; '
+            f'color:{chip_fg}; background:{chip_bg}; border:1px solid {chip_bd}; '
+            f'border-radius:999px; padding:3px 11px; margin:0 6px 6px 0;">'
+            f'{_html.escape(c)}</span>' for c in chips
+        )
+        chip_html = f'<div style="margin-top:10px; line-height:1.9;">{pills}</div>'
+    sub = (f'<div style="font-size:13.5px; color:{fg}; opacity:0.85; '
+           f'margin-top:2px;">{_html.escape(subtext)}</div>') if subtext else ""
+    return (
+        f'<div style="background:{bg}; border:1px solid {bd}; border-radius:14px; '
+        f'padding:16px 18px; margin-bottom:6px;">'
+        f'<div style="font-size:16px; font-weight:700; color:{fg};">'
+        f'{_html.escape(heading)}</div>{sub}{chip_html}</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # Planner card — the slot / candidate / meal card anatomy from the hand-off:
 # a compact RecipeArt (or photo) tile, a slot-label pill, the title with an
 # optional favorite star, a meta line, and reason chips. The Preview / Replace
