@@ -48,32 +48,10 @@ def render():
             go("store_setup")
         return
 
-    # Stats
+    # Primary action leads; the stat tiles are demoted to a strip below it
+    # (rendered after the Sort button) so pasting a list is never below the fold.
     summary = preference_store.data_summary()
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        st.html(stat_card(
-            tone="green", glyph="★",
-            label="Saved preferences",
-            value=summary["preference_count"],
-            sub="brands you trust",
-        ))
-    with col_b:
-        st.html(stat_card(
-            tone="grape", glyph="📌",
-            label="Staples on file",
-            value=summary["staple_count"],
-            sub="auto-included",
-        ))
-    with col_c:
-        st.html(stat_card(
-            tone="sky", glyph="🛒",
-            label="Runs this year",
-            value=summary["session_count"],
-            sub="≈ once a week",
-        ))
 
-    st.divider()
     st.subheader("What are we cooking this week? 🍳")
     st.caption("Paste your list — bullets, prose, categorised, mixed. We'll figure it out.")
 
@@ -205,3 +183,32 @@ def render():
         # Meal-plan load has been consumed; don't show the banner after parse.
         st.session_state.pop("meal_plan_handoff", None)
         go("item_filter")
+
+    # Demoted stats strip — context beneath the primary paste/action.
+    st.divider()
+    _render_stats(summary)
+
+
+def _render_stats(summary: dict):
+    col_a, col_b, col_c = st.columns(3)
+    with col_a:
+        st.html(stat_card(
+            tone="green", glyph="★",
+            label="Saved preferences",
+            value=summary["preference_count"],
+            sub="brands you trust",
+        ))
+    with col_b:
+        st.html(stat_card(
+            tone="grape", glyph="📌",
+            label="Staples on file",
+            value=summary["staple_count"],
+            sub="auto-included",
+        ))
+    with col_c:
+        st.html(stat_card(
+            tone="sky", glyph="🛒",
+            label="Runs this year",
+            value=summary["session_count"],
+            sub="≈ once a week",
+        ))
