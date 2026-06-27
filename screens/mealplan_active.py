@@ -60,8 +60,7 @@ def render():
         if st.button("🛒 Generate grocery list →",
                      type="primary", use_container_width=True,
                      key="mp_active_grocery"):
-            _hand_off_to_smartcart(plan)
-            return
+            _grocery_overlay(plan)
 
     st.divider()
 
@@ -70,8 +69,74 @@ def render():
         _render_meal_card(i, slot)
 
 
-def _hand_off_to_smartcart(plan: dict):
-    """Aggregate ingredients, populate parsed_result, route to preview."""
+@st.dialog("🛒 Grocery list")
+def _grocery_overlay(plan: dict):
+    """Preview the merged grocery list before handing it to SmartCart
+    (handoff §6 grocery overlay). Two-column item list; ingredients used in
+    more than one recipe get an "N recipes" chip. Footer: Close + Hand off."""
+    rules = load_rules()
+    household_size = int(((rules.get("household") or {}).get("size")) or 4)
+    recipe_ids = [m.get("recipe_id") for m in (plan.get("meals") or [])
+                  if m.get("recipe_id")]
+    if not recipe_ids:
+        st.error("No recipes in this plan. Nothing to aggregate.")
+        return
+
+    with st.spinner("Merging ingredients across this week's meals…"):
+        items = grocery.aggregate_grocery_list(recipe_ids, household_size)
+
+    st.caption(f"{len(items)} item{'s' if len(items) != 1 else ''}, merged across "
+               f"{len(recipe_ids)} meal{'s' if len(recipe_ids) != 1 else ''}. "
+               f"You can still add staples and tweak quantities on the next screen.")
+
+    # Two-column item list. Each line: bullet + name (+ qty/unit) + an "N
+    # recipes" chip when the ingredient came from more than one meal.
+    half = (len(items) + 1) // 2
+    col_l, col_r = st.columns(2)
+    for col, chunk in ((col_l, items[:half]), (col_r, items[half:])):
+        with col:
+            for it in chunk:
+                st.html(_grocery_line(it))
+
+    st.divider()
+    col_close, col_go = st.columns([1, 2])
+    with col_close:
+        if st.button("Close", key="mp_groc_close", use_container_width=True):
+            st.rerun()  # dismiss the dialog without navigating
+    with col_go:
+        if st.button("Hand off to SmartCart →", type="primary",
+                     use_container_width=True, key="mp_groc_handoff"):
+            _hand_off_to_smartcart(plan, items=items)
+
+
+def _grocery_line(it: dict) -> str:
+    """One grocery-overlay row: bullet + qty/unit + name, plus a pastel
+    'N recipes' chip when the ingredient is shared across meals."""
+    import html as _html
+    qty = it.get("quantity")
+    if isinstance(qty, float) and qty == int(qty):
+        qty = int(qty)
+    unit = (it.get("unit") or "").strip()
+    if unit in ("count", "serving", "servings"):
+        unit = ""
+    amount = " ".join(str(p) for p in (qty, unit) if p not in (None, "", 0))
+    name = _html.escape(it.get("item_name", ""))
+    label = f"{amount} {name}".strip()
+
+    sources = [s for s in (it.get("notes") or "").split(", ") if s]
+    chip = ""
+    if len(sources) > 1:
+        chip = (f'<span style="margin-left:8px; font-size:11.5px; font-weight:600; '
+                f'color:#2f6f9e; background:#dceaf5; border-radius:999px; '
+                f'padding:1px 8px; white-space:nowrap;">{len(sources)} recipes</span>')
+    return (f'<div style="padding:4px 0; font-size:14px; line-height:1.4;">'
+            f'<span style="color:#2e9e54;">•</span> {label}{chip}</div>')
+
+
+def _hand_off_to_smartcart(plan: dict, items: list[dict] | None = None):
+    """Populate parsed_result from the aggregated grocery items and route to
+    the main grocery page. Accepts pre-aggregated `items` (from the grocery
+    overlay) to avoid a second aggregation pass; aggregates itself otherwise."""
     rules = load_rules()
     household_size = int(((rules.get("household") or {}).get("size")) or 4)
 
@@ -81,8 +146,9 @@ def _hand_off_to_smartcart(plan: dict):
         st.error("No recipes in this plan. Nothing to aggregate.")
         return
 
-    with st.spinner("Aggregating ingredients…"):
-        items = grocery.aggregate_grocery_list(recipe_ids, household_size)
+    if items is None:
+        with st.spinner("Aggregating ingredients…"):
+            items = grocery.aggregate_grocery_list(recipe_ids, household_size)
 
     _log.info("handoff: %d recipe(s), household=%d -> %d aggregated item(s)",
               len(recipe_ids), household_size, len(items))
