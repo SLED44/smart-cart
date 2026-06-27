@@ -113,39 +113,71 @@ def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Plan banner — the home-screen pending (amber) / confirmed (green) cards.
-# Renders the colored card with a heading, subtext, and meal-title chips; the
-# action buttons (Resume/Discard, Open/Plan-new) stay as Streamlit widgets
-# rendered directly below the banner.
+# Plan hero — the home-screen focal card. A confirmed (green) or in-progress
+# (amber) plan shown as a header (heading + status pill + week/date) above a
+# row of meal tiles (RecipeArt/photo + title + meta). The action buttons
+# (Open / Plan-new, Resume / Discard) render as Streamlit widgets below it.
 # ---------------------------------------------------------------------------
 
-def plan_banner(*, tone: Literal["amber", "green"], heading: str,
-                subtext: str = "", chips: list[str] | None = None) -> str:
-    """Colored home-screen banner card. tone 'amber' = plan in progress,
-    'green' = confirmed plan. Render with st.html(); put the buttons below."""
+def _hero_meta(recipe: dict) -> str:
+    """Compact 'Japanese · 35m' meta for a hero tile."""
+    bits = []
+    cu = recipe.get("cuisines") or []
+    if cu:
+        bits.append(cu[0].title())
+    if recipe.get("ready_in_minutes"):
+        bits.append(f"{recipe['ready_in_minutes']}m")
+    return " · ".join(bits)
+
+
+def _hero_tile(recipe: dict) -> str:
+    """One hero meal tile: centered art/photo + title + meta."""
     import html as _html
-    bg, bd, fg, chip_bg, chip_bd, chip_fg = {
-        "amber": (P["amber_50"], P["amber_300"], "#7a5300",
-                  "#ffffff", P["amber_300"], "#7a5300"),
-        "green": ("oklch(97% 0.03 150)", "oklch(87% 0.11 150)", P["green_900"],
-                  "#ffffff", "oklch(87% 0.11 150)", P["green_900"]),
-    }[tone]
-    chip_html = ""
-    if chips:
-        pills = "".join(
-            f'<span style="display:inline-block; font-size:12.5px; font-weight:600; '
-            f'color:{chip_fg}; background:{chip_bg}; border:1px solid {chip_bd}; '
-            f'border-radius:999px; padding:3px 11px; margin:0 6px 6px 0;">'
-            f'{_html.escape(c)}</span>' for c in chips
-        )
-        chip_html = f'<div style="margin-top:10px; line-height:1.9;">{pills}</div>'
-    sub = (f'<div style="font-size:13.5px; color:{fg}; opacity:0.85; '
-           f'margin-top:2px;">{_html.escape(subtext)}</div>') if subtext else ""
+    title = _html.escape(recipe.get("title", "(untitled)")) if recipe else "(empty slot)"
+    meta = _html.escape(_hero_meta(recipe)) if recipe else "—"
+    art = recipe_tile_html(recipe or {}, size=60)
     return (
-        f'<div style="background:{bg}; border:1px solid {bd}; border-radius:14px; '
-        f'padding:16px 18px; margin-bottom:6px;">'
-        f'<div style="font-size:16px; font-weight:700; color:{fg};">'
-        f'{_html.escape(heading)}</div>{sub}{chip_html}</div>'
+        f'<div style="min-width:0; text-align:center;">'
+        f'<div style="display:flex; justify-content:center;">{art}</div>'
+        f'<div style="font-size:13px; font-weight:600; color:{P["fg"]}; '
+        f'margin-top:6px; line-height:1.25; overflow:hidden; '
+        f'text-overflow:ellipsis;">{title}</div>'
+        f'<div style="font-size:11.5px; color:{P["fg_muted"]};">{meta}</div></div>'
+    )
+
+
+def plan_hero(*, tone: Literal["green", "amber"], heading: str, pill_text: str,
+              meta_right: str = "", recipes: list[dict],
+              empty_note: str = "") -> str:
+    """The home-screen hero plan card. Render with st.html(); place the action
+    buttons in a Streamlit column row directly below."""
+    import html as _html
+    pill_bg, pill_bd, pill_fg = {
+        "green": ("oklch(97% 0.03 150)", "oklch(87% 0.11 150)", P["green_900"]),
+        "amber": (P["amber_50"], P["amber_300"], "#7a5300"),
+    }[tone]
+    pill = (
+        f'<span style="font-size:12px; font-weight:600; color:{pill_fg}; '
+        f'background:{pill_bg}; border:1px solid {pill_bd}; border-radius:999px; '
+        f'padding:2px 10px;">{_html.escape(pill_text)}</span>'
+    )
+    right = (f'<span style="font-size:13px; color:{P["fg_muted"]};">'
+             f'{_html.escape(meta_right)}</span>') if meta_right else ""
+    if recipes:
+        tiles = "".join(_hero_tile(r) for r in recipes)
+        body = (f'<div style="display:grid; '
+                f'grid-template-columns:repeat(auto-fit, minmax(92px,1fr)); '
+                f'gap:10px; margin-top:14px;">{tiles}</div>')
+    else:
+        body = (f'<div style="font-size:13.5px; color:{P["fg_muted"]}; '
+                f'margin-top:10px;">{_html.escape(empty_note)}</div>')
+    return (
+        f'<div style="background:{P["surface"]}; border:1px solid {P["border"]}; '
+        f'border-radius:14px; padding:18px 20px; margin-bottom:8px;">'
+        f'<div style="display:flex; align-items:center; justify-content:space-between; '
+        f'gap:10px;"><div style="display:flex; align-items:center; gap:10px;">'
+        f'<span style="font-size:16px; font-weight:700; color:{P["fg"]};">'
+        f'{_html.escape(heading)}</span>{pill}</div>{right}</div>{body}</div>'
     )
 
 

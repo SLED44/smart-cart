@@ -13,7 +13,7 @@ import streamlit as st
 
 from mealplan import library
 from mealplan.rules import load_rules
-from sc_design import stat_card, plan_banner
+from sc_design import stat_card, plan_hero
 from supabase_kv import kv_delete, kv_get
 
 from screens._shared import go
@@ -42,11 +42,8 @@ def render():
     pending = kv_get(KEY_PENDING_LINEUP, None)
     current = kv_get(KEY_CURRENT_PLAN, None)
 
-    _render_stats(summary, rules, current)
-
-    st.divider()
-
-    # The primary action surfaces based on what state we're in.
+    # Hero first: the primary action for the current state leads the page so
+    # the thing you most want (open / resume / plan) is never below the fold.
     if pending and (pending.get("meals") or pending.get("titles")):
         _render_pending_section(pending, rules)
     elif current and current.get("meals"):
@@ -54,7 +51,9 @@ def render():
     else:
         _render_plan_new_section(summary, rules)
 
+    # Stats demoted to a secondary strip beneath the hero.
     st.divider()
+    _render_stats(summary, rules, current)
     _render_settings_expander(summary)
 
 
@@ -120,14 +119,15 @@ def _render_plan_new_section(summary: dict, rules: dict):
         go("mealplan_propose")
 
 
-def _slot_titles(slots: list[dict], lib: dict) -> list[str]:
-    """Resolve a list of plan slots to display titles, indexing a single
-    library snapshot (avoids one KV round-trip per slot)."""
+def _resolve_recipes(slots: list[dict], lib: dict) -> list[dict]:
+    """Resolve plan slots to recipe dicts for the hero tiles, indexing a
+    single library snapshot (avoids one KV round-trip per slot). Missing
+    recipes become a titled placeholder so the tile still renders."""
     out = []
     for slot in slots:
         rid = slot.get("recipe_id")
         recipe = lib.get(rid) if rid else None
-        out.append(recipe["title"] if recipe else f"(missing {rid})")
+        out.append(recipe if recipe else {"title": f"(missing {rid})"})
     return out
 
 
@@ -135,20 +135,21 @@ def _render_pending_section(pending: dict, rules: dict):
     meals = pending.get("meals") or []
     titles = pending.get("titles") or []
     if meals:
-        lib = library.get_all()
-        chips = _slot_titles(meals, lib)
+        recipes = _resolve_recipes(meals, library.get_all())
         touched = pending.get("updated_at", "")
-        sub = (f"{len(meals)} slot(s) so far · last touched {touched[:19]}"
-               if touched else f"{len(meals)} slot(s) so far")
+        meta_right = (f"{len(meals)} slot(s) · {touched[:10]}"
+                      if touched else f"{len(meals)} slot(s)")
     else:
-        chips = list(titles)
-        sub = "Imported from your rules-doc state — titles only, no recipe ids yet."
+        recipes = [{"title": t} for t in titles]
+        meta_right = "imported titles"
 
-    st.html(plan_banner(
+    st.html(plan_hero(
         tone="amber",
-        heading="🟡 You have a plan in progress",
-        subtext=sub,
-        chips=chips,
+        heading="Plan in progress",
+        pill_text="In progress",
+        meta_right=meta_right,
+        recipes=recipes,
+        empty_note="No slots yet — resume to start filling them.",
     ))
 
     col_resume, col_discard = st.columns([2, 1])
@@ -164,23 +165,24 @@ def _render_pending_section(pending: dict, rules: dict):
 
 def _render_current_plan_section(current: dict):
     meals = current.get("meals") or []
-    lib = library.get_all()
+    recipes = _resolve_recipes(meals, library.get_all())
     confirmed = current.get("confirmed_at", "")
-    st.html(plan_banner(
+    st.html(plan_hero(
         tone="green",
-        heading="✅ This week's plan is set",
-        subtext=f"Week #{current.get('week_number','?')}"
-                + (f" · confirmed {confirmed[:10]}" if confirmed else ""),
-        chips=_slot_titles(meals, lib),
+        heading="This week's plan",
+        pill_text="Confirmed",
+        meta_right=f"Week #{current.get('week_number','?')}"
+                   + (f" · {confirmed[:10]}" if confirmed else ""),
+        recipes=recipes,
     ))
 
-    col_active, col_new = st.columns(2)
+    col_active, col_new = st.columns([2, 1])
     with col_active:
         if st.button("📅 Open this week's plan", type="primary",
                      use_container_width=True, key="mph_open_active"):
             go("mealplan_active")
     with col_new:
-        if st.button("🔄 Plan a new week (replaces current)",
+        if st.button("🔄 Plan a new week",
                      use_container_width=True, key="mph_replan"):
             # propose only generates when this flag is set; without it (and with
             # no pending lineup) it dead-ends on "No plan in progress". Plan the
