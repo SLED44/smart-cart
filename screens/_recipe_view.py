@@ -15,6 +15,8 @@ Public surface:
     open_preview(recipe, scale)         -> None  (@st.dialog modal)
 """
 
+import math
+
 import streamlit as st
 
 from sc_design import recipe_art
@@ -75,7 +77,30 @@ _DISCRETE_UNITS = {
     "count", "can", "cans", "clove", "cloves", "package", "packages", "pkg",
     "stick", "sticks", "head", "heads", "slice", "slices", "loaf", "loaves",
     "ear", "ears", "sprig", "sprigs", "bunch", "bunches",
+    "large", "medium", "small",
 }
+
+
+def _round_step(unit: str) -> float:
+    """Granularity a scaled amount snaps to, so a cook never reads "3.2 cup" or
+    "0.2 tsp". Returns the smallest increment we'll show for `unit`."""
+    u = unit.lower()
+    if u in ("lb", "lbs", "pound", "pounds"):
+        return 0.5          # half-pound is the cutoff — never 1.25 lb
+    if u in ("oz", "ounce", "ounces", "fl oz", "floz"):
+        return 1.0          # whole ounces
+    if u in ("cup", "cups"):
+        return 0.25         # quarter-cup measuring marks
+    if u in ("tsp", "teaspoon", "teaspoons", "tbsp", "tbsps", "tbsp.",
+             "tablespoon", "tablespoons"):
+        return 0.25         # quarter-spoon
+    return 0.25             # generic default — keep everything on nice fractions
+
+
+def _round_to(value: float, step: float) -> float:
+    """Round half-up to the nearest `step` (Python's round() is banker's, which
+    surprises in a kitchen: round(2.5) == 2)."""
+    return math.floor(value / step + 0.5) * step
 
 
 def format_ingredient_line(ing: dict, scale: float) -> str:
@@ -108,12 +133,12 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
         return original or name
 
     if unit.lower() in _DISCRETE_UNITS:
-        whole = max(1, round(scaled_amount))
+        whole = max(1, int(_round_to(scaled_amount, 1.0)))
         # Scaling didn't change the whole-item count → original phrasing is
         # clearest (keeps "(28-oz) can", "drained", etc.). The parser sometimes
         # strips the food name out of original_text ("1 (28-oz) can" + name
         # "tomatoes"), so re-attach the name when it's missing.
-        if original and whole == max(1, round(raw_amount)):
+        if original and whole == max(1, int(_round_to(raw_amount, 1.0))):
             if name.lower() not in original.lower():
                 return f"{name} — {original}"
             return original
@@ -121,7 +146,11 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
         unit_word = "" if unit.lower() == "count" else unit
         return f"**{whole}** {unit_word} {name}".replace("  ", " ").strip()
 
-    amount_str = fmt_amount(scaled_amount)
+    # Snap to a kitchen-friendly increment, floored so a real ingredient never
+    # rounds away to zero (e.g. 0.2 tsp → ¼ tsp, not nothing).
+    step = _round_step(unit)
+    snapped = max(step, _round_to(scaled_amount, step))
+    amount_str = fmt_amount(snapped)
     return f"**{amount_str}** {unit} {name}".replace("  ", " ")
 
 

@@ -559,6 +559,37 @@ def recipe_view_tests(t: _T):
                  "original_text": "4 cup chicken broth"}
         assert format_ingredient_line(broth, 0.5).strip() == "**2** cup chicken broth"
 
+    @t.case("scaled amounts snap to nice increments, never ugly decimals")
+    def _():
+        def line(amt, unit, scale):
+            return format_ingredient_line(
+                {"amount": amt, "unit": unit, "name": "x", "original_text": ""},
+                scale,
+            )
+        # 0.8x is the live household case. None of these may show a raw decimal.
+        assert line(4, "cup", 0.8).startswith("**3¼**"), line(4, "cup", 0.8)      # 3.2 -> 3¼
+        assert line(0.25, "tsp", 0.8).startswith("**¼**"), line(0.25, "tsp", 0.8)  # 0.2 -> ¼
+        assert line(1, "tsp", 0.8).startswith("**¾**"), line(1, "tsp", 0.8)        # 0.8 -> ¾
+        assert line(4, "oz", 0.8).startswith("**3**"), line(4, "oz", 0.8)          # 3.2 -> 3 (whole oz)
+        for bad in (".2", "3.2", "0.8", "6⅜"):
+            assert bad not in line(4, "cup", 0.8)
+
+    @t.case("weights snap to half-pound increments — no 1.25 lb")
+    def _():
+        def lb(amt, scale):
+            return format_ingredient_line(
+                {"amount": amt, "unit": "lb", "name": "beef", "original_text": ""},
+                scale,
+            )
+        assert lb(1.25, 1.0).strip() == "**1½** lb beef", lb(1.25, 1.0)
+        assert lb(1.75, 1.0).strip() == "**2** lb beef", lb(1.75, 1.0)
+        assert lb(0.3, 1.0).strip() == "**½** lb beef", lb(0.3, 1.0)   # floor, never 0
+
+    @t.case("floor keeps a real ingredient from rounding away to zero")
+    def _():
+        tiny = {"amount": 0.25, "unit": "tsp", "name": "cayenne", "original_text": ""}
+        assert format_ingredient_line(tiny, 0.1).strip() == "**¼** tsp cayenne"
+
     @t.case("unscaled recipe shows original_text verbatim")
     def _():
         assert format_ingredient_line(can_tomato, 1.0) == "1 (28-oz) can"
