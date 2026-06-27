@@ -135,10 +135,11 @@ Rough priority order. Pick from the top.
 - **`load_dotenv(override=True)`** is intentional — the user's shell exports `ANTHROPIC_API_KEY=` (empty) from Claude Desktop, which would otherwise silently shadow the `.env` value.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
 - **Supabase free-tier pauses after 7 days of inactivity.** A GitHub Actions workflow (`.github/workflows/keepalive.yml`) pings the `kv` table twice a week (Sun + Thu, 14:00 UTC) to keep the project warm. If the project pauses anyway, unpause from https://supabase.com/dashboard/project/odwkznptayhobwjgegin and check the Actions tab for failed runs. Required repo secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
-- **Three Streamlit CSS gotchas** to remember:
+- **Four Streamlit CSS gotchas** to remember:
   - `st.markdown` mangles CSS (interprets `*` as emphasis). Use `st.html` for any raw HTML/CSS injection.
   - The HTML parser closes `<style>` at the first literal `</style>` — even inside CSS comments. Escape with `.replace("</style>", "<\\/style>")` when loading CSS files.
   - `:root` CSS variables don't propagate into Streamlit's component DOM. Use literal colors in inline styles until/unless you scope vars to `.stApp` (see Design-system cleanup in backlog).
+  - `st.html`'s sanitizer (DOMPurify, Streamlit 1.54) silently strips inline `<svg>` — SVG renders as blank space, no error. Build art from plain styled `<div>`s instead (see `sc_design.recipe_tile_html`). Inline SVG *does* work inside `st.components.v1.html` iframes (not sanitized) — that's where `sc_design.recipe_art` is still used (cook-pane).
 
 ## Useful one-liners
 
