@@ -264,6 +264,17 @@ _TEMPLATE = """\
   .step.active .num {{ background: #2e9e54; color: #fff; border-color: #2e9e54; }}
   .scroll::-webkit-scrollbar {{ width: 10px; }}
   .scroll::-webkit-scrollbar-thumb {{ background: #dee2e6; border-radius: 999px; }}
+  /* Phone / narrow: stack the columns and let the whole frame scroll as one
+     (independent column scroll is intentionally dropped below ~720px, per the
+     hand-off responsive notes). The media query keys off the iframe width. */
+  @media (max-width: 720px) {{
+    .topbar .htitle {{ font-size: 19px; }}
+    .frame {{ overflow-y: auto; overscroll-behavior: contain; }}
+    .wrap {{ grid-template-columns: 1fr; flex: 0 0 auto; }}
+    .col {{ grid-template-rows: auto auto; }}
+    .col > .scroll {{ overflow-y: visible; }}
+    .col + .col {{ margin-top: 14px; }}
+  }}
 </style></head>
 <body>
   <div class="frame">
