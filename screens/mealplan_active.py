@@ -183,8 +183,8 @@ def _render_meal_card(i: int, slot: dict):
     with st.container(border=True):
         col_img, col_body, col_act = st.columns([1, 4, 1])
         with col_img:
-            if recipe and recipe.get("image_url"):
-                st.image(recipe["image_url"], width=140)
+            if recipe:
+                _recipe_view.render_thumb(recipe, size=140)
             else:
                 st.caption("🖼")
         with col_body:

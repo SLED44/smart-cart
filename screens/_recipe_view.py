@@ -17,6 +17,25 @@ Public surface:
 
 import streamlit as st
 
+from sc_design import recipe_art
+
+
+# ---------------------------------------------------------------------------
+# Thumbnail — real photo when present, else the generated cuisine-tinted plate
+# (handoff RecipeArt). One helper so every card/modal falls back identically.
+# ---------------------------------------------------------------------------
+
+def render_thumb(recipe: dict, size: int = 140):
+    """Render a recipe thumbnail into the current container: the real
+    image_url if the recipe has one, otherwise the deterministic RecipeArt
+    placeholder at `size` px."""
+    if recipe and recipe.get("image_url"):
+        st.image(recipe["image_url"], width=size)
+    else:
+        cuisine = (recipe.get("cuisines") or [""])[0] if recipe else ""
+        glyph = (recipe.get("glyph") or "🍽") if recipe else "📭"
+        st.html(recipe_art(glyph, cuisine, size=size))
+
 
 # ---------------------------------------------------------------------------
 # Scaling + amount formatting
@@ -139,25 +158,30 @@ def render_instructions(recipe: dict):
 def render_recipe_detail(recipe: dict, scale: float = 1.0):
     """Full read-only recipe body: meta header, notes, ingredients, steps.
     No feedback buttons — those live only on the cook screen."""
-    st.markdown(f"### {recipe.get('title','(untitled)')}")
+    # Header: art/photo tile beside the title + meta (handoff preview modal).
+    col_tile, col_head = st.columns([1, 3])
+    with col_tile:
+        render_thumb(recipe, size=80)
+    with col_head:
+        st.markdown(f"### {recipe.get('title','(untitled)')}")
 
-    meta_bits = []
-    if recipe.get("cuisines"):
-        meta_bits.append(", ".join(c.title() for c in recipe["cuisines"]))
-    if recipe.get("proteins"):
-        meta_bits.append("· " + "/".join(recipe["proteins"]))
-    if recipe.get("ready_in_minutes"):
-        meta_bits.append(f"· {recipe['ready_in_minutes']} min")
-    if recipe.get("servings_original"):
-        meta_bits.append(f"· serves {recipe['servings_original']}")
-    if recipe.get("rating"):
-        meta_bits.append(f"·  {star_str(recipe['rating'])}")
-    if meta_bits:
-        st.caption(" ".join(meta_bits))
-    if recipe.get("equipment"):
-        st.caption(f"Equipment: {', '.join(recipe['equipment'])}")
-    if recipe.get("source_url"):
-        st.markdown(f"[Source ↗]({recipe['source_url']})")
+        meta_bits = []
+        if recipe.get("cuisines"):
+            meta_bits.append(", ".join(c.title() for c in recipe["cuisines"]))
+        if recipe.get("proteins"):
+            meta_bits.append("· " + "/".join(recipe["proteins"]))
+        if recipe.get("ready_in_minutes"):
+            meta_bits.append(f"· {recipe['ready_in_minutes']} min")
+        if recipe.get("servings_original"):
+            meta_bits.append(f"· serves {recipe['servings_original']}")
+        if recipe.get("rating"):
+            meta_bits.append(f"·  {star_str(recipe['rating'])}")
+        if meta_bits:
+            st.caption(" ".join(meta_bits))
+        if recipe.get("equipment"):
+            st.caption(f"Equipment: {', '.join(recipe['equipment'])}")
+        if recipe.get("source_url"):
+            st.markdown(f"[Source ↗]({recipe['source_url']})")
 
     notes = (recipe.get("user_notes") or "").strip()
     if notes:

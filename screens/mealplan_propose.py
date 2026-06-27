@@ -201,11 +201,10 @@ def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: 
     with st.container(border=True):
         col_img, col_body, col_actions = st.columns([1, 4, 1])
 
-        if recipe and recipe.get("image_url"):
-            with col_img:
-                st.image(recipe["image_url"], width=140)
-        elif not recipe:
-            with col_img:
+        with col_img:
+            if recipe:
+                _recipe_view.render_thumb(recipe, size=140)
+            else:
                 st.write("📭")
 
         with col_body:

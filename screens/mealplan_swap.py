@@ -220,10 +220,7 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
     with st.container(border=True):
         col_img, col_body, col_actions = st.columns([1, 4, 1])
         with col_img:
-            if recipe.get("image_url"):
-                st.image(recipe["image_url"], width=160)
-            else:
-                st.caption("🖼")
+            _recipe_view.render_thumb(recipe, size=160)
         with col_body:
             st.markdown(f"### {recipe.get('title','(untitled)')}")
             meta_bits = []
