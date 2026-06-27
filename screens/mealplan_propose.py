@@ -301,6 +301,11 @@ def _render_why_panel(meals: list[dict], rules: dict, lib: dict):
         if meta["must_include_covered"]:
             st.caption(f"Covered must-include: {', '.join(meta['must_include_covered'])}")
 
+        for e in meta.get("equipment_covered", []):
+            st.caption(f"🍲 {e.replace('_', ' ')} night included")
+        for e in meta.get("equipment_missing", []):
+            st.warning(f"No {e.replace('_', ' ')} meal in this plan")
+
         sh = meta.get("shrimp_status")
         if sh:
             ws = sh.get("weeks_since")

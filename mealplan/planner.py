@@ -274,6 +274,13 @@ def lineup_meta(result: LineupResult, rules: dict) -> dict:
     covered = sorted(must & set(cuisines.keys()))
     missing = sorted(must - set(cuisines.keys()))
 
+    # Weekly equipment targets (e.g. one slow-cooker meal) — covered if any
+    # recipe in the lineup uses the target appliance.
+    want_equip = [e.lower() for e in ((rules.get("equipment") or {}).get("include_one_of_per_week") or [])]
+    equip_in_lineup = {e.lower() for r in result.recipes for e in (r.get("equipment") or [])}
+    equipment_covered = [e for e in want_equip if e in equip_in_lineup]
+    equipment_missing = [e for e in want_equip if e not in equip_in_lineup]
+
     cw = int(((rules.get("state") or {}).get("current_week")) or 1)
     shrimp_status = None
     for entry in (rules.get("protein_cadences") or []):
@@ -313,6 +320,8 @@ def lineup_meta(result: LineupResult, rules: dict) -> dict:
         "carb_counts":         carbs,
         "must_include_covered": covered,
         "must_include_missing": missing,
+        "equipment_covered":   equipment_covered,
+        "equipment_missing":   equipment_missing,
         "shrimp_status":       shrimp_status,
         "favorites_status":    favorites_status,
         "relaxations_used":    relax_levels,

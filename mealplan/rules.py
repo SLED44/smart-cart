@@ -95,6 +95,11 @@ _BONUS_CUISINE_MUST_INCLUDE = 20
 # includes the household.default_appliance get a small score boost so they
 # float toward the top without crowding out the variety of the library.
 _BONUS_APPLIANCE_MATCH = 10
+# Weekly equipment target (extension beyond PRD §8.2 — decided 2026-06-27).
+# Same shape/strength as the must-include cuisine: biases exactly one recipe
+# using a target appliance (slow cooker) into each plan, then stops once the
+# lineup covers it. Relaxed at L3 alongside the cuisine must-include.
+_BONUS_EQUIPMENT_INCLUDE = 20
 
 # Planning-feedback signals from the event log (extension beyond PRD §8.2 —
 # added 2026-06-12 after the same recipe was proposed and swapped out two
@@ -196,6 +201,11 @@ def default_rules() -> dict:
             "must_include_one_of_per_week": ["american", "italian", "mexican"],
             "forbid_back_to_back_same_cuisine": True,
         },
+        "equipment": {
+            # Bias one meal per week onto a target appliance. Slow-cooker night
+            # is a standing household want (2026-06-27): a hands-off dinner.
+            "include_one_of_per_week": ["slow_cooker"],
+        },
         "favorites": [],
         "exclusions": [],
         "pair_exclusions": [],
@@ -292,6 +302,11 @@ def validate_rules(rules: dict) -> list[str]:
         for m in musts:
             if m not in rot:
                 errs.append(f"must_include cuisine {m!r} not in rotation_set")
+
+    eq = rules.get("equipment") or {}
+    inc = eq.get("include_one_of_per_week")
+    if inc is not None and not isinstance(inc, list):
+        errs.append("equipment.include_one_of_per_week must be a list")
 
     if not isinstance(rules.get("favorites") or [], list):
         errs.append("favorites must be a list")
@@ -426,6 +441,21 @@ def evaluate_candidate(
     else:
         if must and (must & set(cuisines_lower)) and not (must & covered_in_lineup):
             relaxations.append("must-include cuisine ignored (L3)")
+
+    # Include-one equipment target (e.g. one slow-cooker meal per week). Same
+    # shape as the cuisine must-include: bonus while no recipe in the lineup
+    # already covers the target appliance; relaxed at L3.
+    want_equip = {e.lower() for e in (rules.get("equipment") or {}).get("include_one_of_per_week") or []}
+    recipe_equip = {e.lower() for e in (recipe.get("equipment") or [])}
+    equip_in_lineup = {e.lower() for r in current_lineup for e in (r.get("equipment") or [])}
+    equip_hit = want_equip & recipe_equip
+    if equip_hit and not (want_equip & equip_in_lineup):
+        if relaxation_level < 3:
+            score += _BONUS_EQUIPMENT_INCLUDE
+            reasons.append(f"covers weekly {'/'.join(sorted(equip_hit))} target "
+                           f"(+{_BONUS_EQUIPMENT_INCLUDE})")
+        else:
+            relaxations.append("weekly equipment target ignored (L3)")
 
     # Variety penalties (relaxation L1 zeroes these).
     lineup_cuisines = {

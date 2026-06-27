@@ -59,8 +59,29 @@ _CUISINE_KEY = "mealplan_swap_cuisine"
 _PROTEIN_KEY = "mealplan_swap_protein"
 _NAME_KEY = "mealplan_swap_name_search"
 _SEEN_KEY = "mealplan_swap_seen_ids"
+_INIT_KEY = "mealplan_swap_initialized_for"  # slot the filters were seeded for
+
+# Selectbox/text widget keys — cleared between slots so the seeded protein
+# isn't shadowed by a value the widget persisted from a previous slot.
+_WIDGET_KEYS = ("mp_swap_cui_input", "mp_swap_pro_input", "mp_swap_name_input")
 
 _ANY = "any"
+
+
+def _match_protein(recipe: dict | None) -> str:
+    """The protein to pre-filter swap candidates by, so replacements match the
+    meal being replaced (chicken→chicken, vegetarian→vegetarian). A meatless
+    dish (proteins == ['plant']) matches 'plant'; a mixed dish matches its first
+    real protein. Empty/unknown → 'any'."""
+    proteins = [p.lower() for p in (recipe or {}).get("proteins", []) if p]
+    if not proteins:
+        return _ANY
+    if set(proteins) <= {"plant"}:
+        return "plant"
+    for p in proteins:
+        if p in _VALID_PROTEINS and p != "plant":
+            return p
+    return proteins[0] if proteins[0] in _VALID_PROTEINS else _ANY
 
 
 def render():
@@ -98,11 +119,22 @@ def render():
     rules = load_rules()
     history = kv_get(KEY_HISTORY, []) or []
 
+    # Seed the protein filter from the meal being replaced on first entry for
+    # this slot, so the default list matches it (chicken→chicken, veg→veg).
+    # Only seeds once per slot — a user override (incl. "Any protein") sticks.
+    if st.session_state.get(_INIT_KEY) != slot_index:
+        st.session_state[_PROTEIN_KEY] = _match_protein(current_recipe)
+        st.session_state[_INIT_KEY] = slot_index
+
     _render_filter_bar(rules)
 
     cuisine = st.session_state.get(_CUISINE_KEY, _ANY)
     protein = st.session_state.get(_PROTEIN_KEY, _ANY)
     name_search = st.session_state.get(_NAME_KEY, "")
+
+    if protein != _ANY:
+        st.caption(f"Showing **{protein}** options to match this meal — "
+                   f"change the Protein filter to broaden.")
 
     cuisine_arg = None if cuisine == _ANY else cuisine
     protein_arg = None if protein == _ANY else protein
@@ -214,7 +246,9 @@ def _render_action_bar(result):
             go("mealplan_propose")
     with col_reset:
         if st.button("↻ Reset filters", key="mp_swap_reset"):
-            for k in (_CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY):
+            # Clearing _INIT_KEY (and the widgets) → render re-seeds protein to
+            # match the meal again.
+            for k in (_CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY, *_WIDGET_KEYS):
                 st.session_state.pop(k, None)
             st.rerun()
     with col_new:
@@ -351,5 +385,5 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
 
 
 def _clear_session():
-    for k in (_SLOT_KEY, _CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY):
+    for k in (_SLOT_KEY, _CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY, *_WIDGET_KEYS):
         st.session_state.pop(k, None)

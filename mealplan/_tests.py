@@ -650,12 +650,143 @@ def grocery_addon_tests(t: _T):
         assert item["category"] == "Produce" and item["source"] == "meal_plan"
 
 
+# ---------------------------------------------------------------------------
+# Swap matching tests (mealplan/swap.py)
+# ---------------------------------------------------------------------------
+
+def swap_tests(t: _T):
+    from mealplan import swap as _swap
+    from mealplan import library as _libmod
+    from mealplan import event_log as _evt
+
+    # Synthetic library spanning several proteins. plant_beef is a meat dish
+    # that merely *includes* a plant protein (the pasta-e-fagioli case).
+    recipes = [
+        R("chk_a", cuisines=["american"], proteins=["chicken"], carbs=["rice"]),
+        R("chk_b", cuisines=["italian"],  proteins=["chicken"], carbs=["pasta"]),
+        R("chk_c", cuisines=["greek"],    proteins=["chicken"], carbs=["potato"]),
+        R("chk_d", cuisines=["thai"],     proteins=["chicken"], carbs=["rice"]),
+        R("veg_a", cuisines=["mexican"],  proteins=["plant"],   carbs=["tortilla"]),
+        R("veg_b", cuisines=["indian"],   proteins=["plant"],   carbs=["rice"]),
+        R("veg_c", cuisines=["italian"],  proteins=["plant"],   carbs=["pasta"]),
+        R("plant_beef", cuisines=["italian"], proteins=["plant", "beef"], carbs=["pasta"]),
+        R("lamb_a", cuisines=["greek"],   proteins=["lamb"],    carbs=["rice"]),
+        R("beef_a", cuisines=["american"], proteins=["beef"],   carbs=["bread"]),
+        R("fish_a", cuisines=["american"], proteins=["fish"],   carbs=["potato"]),
+    ]
+    by_id = {r["id"]: r for r in recipes}
+
+    def fake_filter(cuisine=None, protein=None, status=None, name_search=None):
+        def keep(r):
+            if protein and protein.lower() not in [p.lower() for p in r.get("proteins", [])]:
+                return False
+            if cuisine and cuisine.lower() not in [c.lower() for c in r.get("cuisines", [])]:
+                return False
+            return True
+        return [r for r in recipes if keep(r)]
+
+    # Patch the module-level surfaces get_swap_candidates touches.
+    orig_filter, orig_get, orig_fb = _libmod.filter, _libmod.get, _evt.feedback_signals
+    _libmod.filter = fake_filter
+    _libmod.get = lambda rid: by_id.get(rid)
+    _evt.feedback_signals = lambda *a, **k: {}
+    try:
+        rules = default_rules()
+
+        @t.case("replacing a chicken meal returns >=3 chicken matches")
+        def _():
+            res = _swap.get_swap_candidates(0, [by_id["chk_a"]], rules, protein="chicken")
+            matched = [c for c in res.candidates if c.protein_match]
+            assert len(matched) >= 3, len(matched)
+            assert all("chicken" in c.recipe["proteins"] for c in matched)
+
+        @t.case("vegetarian match excludes dishes that also contain meat")
+        def _():
+            res = _swap.get_swap_candidates(0, [by_id["veg_a"]], rules, protein="plant")
+            ids = {c.recipe["id"] for c in res.candidates if c.protein_match}
+            assert "plant_beef" not in ids, ids
+            assert ids == {"veg_b", "veg_c"} or "veg_b" in ids  # veg_a is the slot
+
+        @t.case("thin protein (lamb) tops up with flagged fillers ranked last")
+        def _():
+            res = _swap.get_swap_candidates(0, [by_id["lamb_a"]], rules,
+                                            protein="lamb", min_match=3)
+            assert len(res.candidates) >= 3, len(res.candidates)
+            # the only other lamb dish is the slot itself (excluded) → 0 real
+            # matches, so all shown are fillers, and a note explains it.
+            assert all(not c.protein_match for c in res.candidates)
+            assert "lamb" in res.note.lower()
+
+        @t.case("matches always rank ahead of fillers")
+        def _():
+            # beef has one other dish (beef_a); should lead, fillers follow.
+            res = _swap.get_swap_candidates(0, [R("beef_x", proteins=["beef"])],
+                                            rules, protein="beef", min_match=3)
+            if any(c.protein_match for c in res.candidates):
+                first_filler = next((i for i, c in enumerate(res.candidates)
+                                     if not c.protein_match), len(res.candidates))
+                last_match = max((i for i, c in enumerate(res.candidates)
+                                  if c.protein_match), default=-1)
+                assert last_match < first_filler
+    finally:
+        _libmod.filter, _libmod.get, _evt.feedback_signals = orig_filter, orig_get, orig_fb
+
+
+# ---------------------------------------------------------------------------
+# Weekly slow-cooker target (rules.equipment.include_one_of_per_week)
+# ---------------------------------------------------------------------------
+
+def equipment_target_tests(t: _T):
+    from mealplan.rules import evaluate_candidate, default_rules, validate_rules
+
+    sc = R("sc1", cuisines=["thai"], proteins=["pork"], carbs=["rice"],
+           equipment=["slow_cooker"])
+
+    @t.case("slow-cooker recipe is boosted when none is in the lineup yet")
+    def _():
+        ev = evaluate_candidate(sc, default_rules(), [], [], relaxation_level=0)
+        assert ev.eligible and any("slow_cooker target" in r for r in ev.reasons), ev.reasons
+
+    @t.case("the boost stops once a slow-cooker meal is already in the lineup")
+    def _():
+        already = R("sc0", cuisines=["greek"], proteins=["beef"], carbs=["grain"],
+                    equipment=["slow_cooker"])
+        ev = evaluate_candidate(sc, default_rules(), [already], [], relaxation_level=0)
+        assert not any("slow_cooker target" in r for r in ev.reasons), ev.reasons
+
+    @t.case("the boost is relaxed away at level 3 (alongside must-include cuisine)")
+    def _():
+        ev = evaluate_candidate(sc, default_rules(), [], [], relaxation_level=3)
+        assert not any("slow_cooker target" in r for r in ev.reasons), ev.reasons
+
+    @t.case("a generated plan includes a slow-cooker meal")
+    def _():
+        lib = synthetic_library() + [
+            R("sc_a", cuisines=["american"], proteins=["beef"], carbs=["potato"],
+              equipment=["slow_cooker"]),
+            R("sc_b", cuisines=["mexican"], proteins=["pork"], carbs=["rice"],
+              equipment=["slow_cooker"]),
+        ]
+        res = generate_lineup(5, default_rules(), lib, history=[])
+        n_sc = sum(1 for s in res.slots if "slow_cooker" in (s.recipe.get("equipment") or []))
+        assert n_sc >= 1, n_sc
+
+    @t.case("validate_rules accepts the equipment block, rejects a non-list")
+    def _():
+        assert validate_rules(default_rules()) == []
+        bad = default_rules()
+        bad["equipment"]["include_one_of_per_week"] = "slow_cooker"
+        assert any("include_one_of_per_week" in e for e in validate_rules(bad))
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
     planner_tests(t)
     recipe_view_tests(t)
     grocery_addon_tests(t)
+    swap_tests(t)
+    equipment_target_tests(t)
     return t.summary()
 
 
