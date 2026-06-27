@@ -19,24 +19,24 @@ import math
 
 import streamlit as st
 
-from sc_design import recipe_art
+from sc_design import recipe_tile_html
 
 
 # ---------------------------------------------------------------------------
-# Thumbnail — real photo when present, else the generated cuisine-tinted plate
-# (handoff RecipeArt). One helper so every card/modal falls back identically.
+# Thumbnail — real photo when present, else the cuisine-tinted plate tile.
+# One helper so every card/modal falls back identically. Uses the CSS plate
+# (recipe_tile_html), not the SVG art — Streamlit's st.html sanitizer strips
+# inline <svg>, which rendered the SVG tiles as blank space.
 # ---------------------------------------------------------------------------
 
 def render_thumb(recipe: dict, size: int = 140):
     """Render a recipe thumbnail into the current container: the real
-    image_url if the recipe has one, otherwise the deterministic RecipeArt
-    placeholder at `size` px."""
+    image_url if the recipe has one, otherwise the cuisine-tinted plate tile
+    at `size` px."""
     if recipe and recipe.get("image_url"):
         st.image(recipe["image_url"], width=size)
     else:
-        cuisine = (recipe.get("cuisines") or [""])[0] if recipe else ""
-        glyph = (recipe.get("glyph") or "🍽") if recipe else "📭"
-        st.html(recipe_art(glyph, cuisine, size=size))
+        st.html(recipe_tile_html(recipe or {}, size=size))
 
 
 # ---------------------------------------------------------------------------

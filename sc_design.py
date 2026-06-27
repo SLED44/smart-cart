@@ -189,9 +189,14 @@ def plan_hero(*, tone: Literal["green", "amber"], heading: str, pill_text: str,
 # ---------------------------------------------------------------------------
 
 def recipe_tile_html(recipe: dict, size: int = 54) -> str:
-    """Raw HTML for a recipe's compact tile: the real photo if present, else
-    the generated RecipeArt plate. For embedding inside a card HTML block
-    (use render_thumb() when you want a standalone st.* element instead)."""
+    """Raw HTML for a recipe's compact tile: the real photo if present, else a
+    cuisine-tinted plate (flat square + white plate circle + dish glyph).
+
+    Built from plain <div>s, NOT the SVG recipe_art() — Streamlit's st.html
+    sanitizer strips inline <svg>, so SVG tiles render as blank space. The SVG
+    version is still used inside the cook-pane iframe (components.html), which
+    isn't sanitized. Same (glyph, cuisine) → same tint here as the SVG art.
+    """
     box = (f'width:{size}px; height:{size}px; flex-shrink:0; border-radius:12px; '
            f'overflow:hidden; display:flex; align-items:center; justify-content:center;')
     if recipe and recipe.get("image_url"):
@@ -201,7 +206,16 @@ def recipe_tile_html(recipe: dict, size: int = 54) -> str:
                 f'style="width:100%; height:100%; object-fit:cover;"></div>')
     cuisine = (recipe.get("cuisines") or [""])[0] if recipe else ""
     glyph = (recipe.get("glyph") or "🍽") if recipe else "🍽"
-    return f'<div style="{box}">{recipe_art(glyph, cuisine, size=size)}</div>'
+    bg, ring, _accent = _ART_PALETTES[_art_palette_key(cuisine, glyph)]
+    plate = int(size * 0.66)
+    gf = round(size * 0.36, 1)
+    return (
+        f'<div style="{box} background:{bg};">'
+        f'<div style="box-sizing:border-box; width:{plate}px; height:{plate}px; '
+        f'border-radius:50%; background:#ffffff; border:1px solid {ring}; '
+        f'display:flex; align-items:center; justify-content:center; '
+        f'font-size:{gf}px; line-height:1;">{glyph}</div></div>'
+    )
 
 
 def planner_card(*, recipe: dict, label: str, title: str, meta: str = "",
