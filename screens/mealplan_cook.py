@@ -36,7 +36,6 @@ _DEFAULT_FAV_CADENCE = [4, 6]
 from screens._shared import go
 from screens import _recipe_view
 from screens._cook_pane import build_cook_pane, PANE_HEIGHT
-from sc_design import recipe_art
 
 _RECIPE_KEY = "mealplan_cook_recipe_id"
 _NOTES_EDIT_KEY = "mealplan_cook_notes_edit_open"
@@ -95,36 +94,21 @@ def _render_top_bar():
 
 
 def _render_hero(recipe: dict, household_size: int, original_servings: int):
-    col_img, col_body = st.columns([1, 2])
-    with col_img:
-        if recipe.get("image_url"):
-            st.image(recipe["image_url"], use_container_width=True)
-        else:
-            # Generated cuisine-tinted plate placeholder (handoff RecipeArt).
-            cuisine = (recipe.get("cuisines") or [""])[0]
-            st.html(recipe_art(recipe.get("glyph", "🍽"), cuisine, size=160))
-    with col_body:
-        st.title(recipe.get("title", "(untitled)"))
-        if recipe.get("cuisines"):
-            st.caption(" · ".join(c.title() for c in recipe["cuisines"]))
-
-        col_t, col_s, col_c = st.columns(3)
-        with col_t:
-            st.metric("Ready in", f"{recipe.get('ready_in_minutes','?')} min")
-        with col_s:
-            if household_size == original_servings:
-                st.metric("Serves", household_size)
-            else:
-                st.metric("Serves", household_size,
-                          delta=f"recipe yields {original_servings}",
-                          delta_color="off")
-        with col_c:
-            st.metric("Cooked", recipe.get("times_cooked", 0))
-
-        if recipe.get("equipment"):
-            st.caption(f"Equipment: {', '.join(recipe['equipment'])}")
-        if recipe.get("source_url"):
-            st.markdown(f"[Source ↗]({recipe['source_url']})")
+    # The title / art tile / cuisine pill / meta chips now live inside the
+    # cooking-pane iframe (so the two columns own the frame and scroll
+    # independently). Here we keep only the bits the pane header omits:
+    # household scaling, how many times it's been cooked, and the source link.
+    bits = []
+    if household_size != original_servings:
+        bits.append(f"Scaled to your household of {household_size} "
+                    f"(recipe yields {original_servings})")
+    else:
+        bits.append(f"Serves {household_size}")
+    if recipe.get("times_cooked"):
+        bits.append(f"Cooked {recipe['times_cooked']}×")
+    st.caption(" · ".join(bits))
+    if recipe.get("source_url"):
+        st.markdown(f"[Source ↗]({recipe['source_url']})")
 
 
 def _render_notes_callout(recipe: dict):
