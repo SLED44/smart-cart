@@ -16,6 +16,7 @@ Public surface:
 """
 
 import math
+import re
 
 import streamlit as st
 
@@ -103,6 +104,54 @@ def _round_to(value: float, step: float) -> float:
     return math.floor(value / step + 0.5) * step
 
 
+# Whole, countable items that should never render as a fraction even when the
+# imported `unit` is blank or "count" (e.g. "¾ bell pepper"). Matched as whole
+# words against the ingredient name. NOTE: kept to clearly-countable nouns —
+# bare "pepper" is excluded so "black pepper" stays measurable.
+_WHOLE_ITEMS = (
+    "onion", "bell pepper", "poblano", "jalapeno", "jalapeño", "lime", "lemon",
+    "egg", "avocado", "zucchini", "cucumber", "carrot", "shallot", "scallion",
+    "green onion", "tortilla", "bun", "roll", "pita", "naan", "potato",
+    "sweet potato", "bay leaf", "chicken thigh", "chicken breast",
+    "chicken tenderloin", "pork chop", "corn tortilla", "flour tortilla",
+    "eggplant", "leek", "artichoke",
+)
+# Match singular or plural ("chicken thigh" → "chicken thighs", "potato" →
+# "potatoes"), but not substrings ("egg" must not hit "eggplant").
+_WHOLE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _WHOLE_ITEMS) + r")(?:e?s)?\b", re.I)
+
+# A row is a can/jar sold whole when the text names a can or carries a package
+# size like "(15 oz)" / "15-oz can". For these the stored amount is the package
+# size, not a count we can scale — so we show the original phrasing intact.
+_CAN_RE = re.compile(r"\bcans?\b|\(\s*\d+(?:\.\d+)?\s*-?\s*(?:oz|ounce|fl\s*oz)", re.I)
+
+# Measure units whose number is a package size (not a count) when the row is a
+# can — scaling them produces nonsense like "10 oz crushed tomatoes".
+_CAN_MEASURE_UNITS = {"oz", "ounce", "ounces", "fl oz", "floz", "cup", "cups",
+                      "g", "gram", "grams", "ml"}
+
+
+def _looks_canned(original: str) -> bool:
+    return bool(original and _CAN_RE.search(original))
+
+
+def _is_whole_item(name: str, unit: str) -> bool:
+    """A countable whole item the cook buys individually. Only applies when the
+    unit is blank or 'count' — a real measure unit (lb/cup/…) always wins."""
+    if unit.lower() not in ("", "count"):
+        return False
+    return bool(_WHOLE_RE.search(name or ""))
+
+
+def _with_name(original: str, name: str) -> str:
+    """Show original_text, re-attaching the food name when the parser stripped
+    it out ("1 (28-oz) can" + name "tomatoes" → "tomatoes — 1 (28-oz) can")."""
+    if name and name.lower() not in original.lower():
+        return f"{name} — {original}"
+    return original
+
+
 def format_ingredient_line(ing: dict, scale: float) -> str:
     """One amount, one unit per line.
 
@@ -132,16 +181,21 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
     if not scaled_amount:
         return original or name
 
-    if unit.lower() in _DISCRETE_UNITS:
+    # Cans/jars measured by package size (e.g. "15 oz" of crushed tomatoes) —
+    # the number is the can's size, not a count we can scale. Show the original
+    # phrasing so it reads "1 (15-oz) can …" instead of "10 oz …".
+    if original and _looks_canned(original) and unit.lower() in _CAN_MEASURE_UNITS:
+        return _with_name(original, name)
+
+    # Discrete whole items: a discrete unit (can/clove/count/…) OR a countable
+    # name with a blank/"count" unit (bell pepper, onion, lime). Round to a whole
+    # number (min 1) — never a fraction of a pepper or a can.
+    if unit.lower() in _DISCRETE_UNITS or _is_whole_item(name, unit):
         whole = max(1, int(_round_to(scaled_amount, 1.0)))
-        # Scaling didn't change the whole-item count → original phrasing is
-        # clearest (keeps "(28-oz) can", "drained", etc.). The parser sometimes
-        # strips the food name out of original_text ("1 (28-oz) can" + name
-        # "tomatoes"), so re-attach the name when it's missing.
+        # Scaling didn't change the whole count → original phrasing is clearest
+        # (keeps "(28-oz) can", "drained", "sliced", etc.).
         if original and whole == max(1, int(_round_to(raw_amount, 1.0))):
-            if name.lower() not in original.lower():
-                return f"{name} — {original}"
-            return original
+            return _with_name(original, name)
         # "count" is an internal placeholder, not a word a cook wants to read.
         unit_word = "" if unit.lower() == "count" else unit
         return f"**{whole}** {unit_word} {name}".replace("  ", " ").strip()

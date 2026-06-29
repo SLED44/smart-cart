@@ -615,6 +615,34 @@ def recipe_view_tests(t: _T):
     def _():
         assert format_ingredient_line(can_tomato, 1.0) == "1 (28-oz) can"
 
+    @t.case("whole produce with a blank unit never renders as a fraction")
+    def _():
+        # "1 bell pepper" at 0.67x must not become "¾ bell pepper".
+        pep = {"amount": 1, "unit": "", "name": "bell pepper",
+               "original_text": "1 red bell pepper, diced"}
+        line = format_ingredient_line(pep, 0.67)
+        for bad in ("¾", "0.75", "0.67", ".67"):
+            assert bad not in line, line
+        onion = {"amount": 2, "unit": "", "name": "onion", "original_text": "2 onions"}
+        assert format_ingredient_line(onion, 0.5).strip() == "**1** onion", \
+            format_ingredient_line(onion, 0.5)
+
+    @t.case("canned goods measured in oz show the can, not scaled ounces")
+    def _():
+        crushed = {"amount": 15, "unit": "oz", "name": "crushed tomatoes",
+                   "original_text": "1 can (15 oz) crushed tomatoes"}
+        line = format_ingredient_line(crushed, 0.67)
+        assert "can" in line and "10" not in line, line
+
+    @t.case("measured spices and eggplant-vs-egg are handled correctly")
+    def _():
+        pepper = {"amount": 1, "unit": "tsp", "name": "black pepper",
+                  "original_text": "1 tsp black pepper"}
+        assert "tsp" in format_ingredient_line(pepper, 0.5)  # stays measured
+        egg = {"amount": 2, "unit": "", "name": "eggplant", "original_text": "2 eggplants"}
+        assert format_ingredient_line(egg, 0.5).strip() == "**1** eggplant", \
+            format_ingredient_line(egg, 0.5)  # eggplant is whole, not via 'egg'
+
 
 # ---------------------------------------------------------------------------
 # Grocery optional-add-on tests (mealplan/grocery.py)
