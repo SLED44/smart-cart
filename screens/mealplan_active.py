@@ -12,7 +12,8 @@ import streamlit as st
 
 from mealplan import grocery, library
 from mealplan.event_log import EVT_GROCERY_GENERATED, log_event
-from mealplan.rules import load_rules
+from mealplan.planner import extend_lineup
+from mealplan.rules import load_rules, with_equipment_target
 from supabase_kv import kv_get, kv_put
 
 from screens._shared import clear_review_widget_state, go
@@ -46,9 +47,10 @@ def render():
             go("mealplan_home")
         return
 
-    # Flash set by the cook screen (Made it / notes saved / never again) —
-    # it navigates here immediately, so this is where the message must show.
-    flash = st.session_state.pop("mealplan_cook_flash", None)
+    # Flash set by the cook screen (Made it / notes saved / never again) or by
+    # an add/remove edit below — navigates here immediately, so show it here.
+    flash = st.session_state.pop("mealplan_cook_flash", None) \
+        or st.session_state.pop("mealplan_active_flash", None)
     if flash:
         st.success(flash)
 
@@ -67,6 +69,11 @@ def render():
     with col_replan:
         if st.button("🔄 Plan new (replaces this)",
                      use_container_width=True, key="mp_active_replan"):
+            # Carry the current meal count + slow-cooker choice so the new plan
+            # starts from the same settings (adjustable on the propose screen).
+            st.session_state.mealplan_propose_n = len(plan.get("meals") or []) or 5
+            if "include_slow_cooker" in plan:
+                st.session_state.mealplan_propose_include_sc = bool(plan["include_slow_cooker"])
             st.session_state.mealplan_propose_fresh = True
             go("mealplan_propose")
     with col_grocery:
@@ -80,7 +87,13 @@ def render():
     meals = plan.get("meals") or []
     rules = load_rules()  # one fetch; reused by every card (favorite + scaling)
     for i, slot in enumerate(meals):
-        _render_meal_card(i, slot, rules)
+        _render_meal_card(i, slot, rules, plan, can_remove=len(meals) > 1)
+
+    # Pivot the plan size after confirming — add a fitting meal if the week
+    # got busier, remove one if plans changed. Both mark the grocery list stale.
+    if st.button("➕ Add a meal", key="mp_active_add_meal"):
+        _add_meal(plan)
+        st.rerun()
 
 
 @st.dialog("🛒 Grocery list")
@@ -288,7 +301,57 @@ def _items_to_text(items: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _render_meal_card(i: int, slot: dict, rules: dict):
+KEY_HISTORY = "meal_plan_history"
+
+
+def _add_meal(plan: dict):
+    """Append one fitting recipe to the confirmed plan (extends without
+    disturbing existing picks). Marks the grocery list stale."""
+    rules = load_rules()
+    # Respect this plan's slow-cooker choice when picking the added meal.
+    sc_default = bool((rules.get("household") or {}).get("slow_cooker_default", True))
+    include_sc = bool(plan.get("include_slow_cooker", sc_default))
+    eff_rules = with_equipment_target(rules, "slow_cooker", include_sc)
+    meals = plan.get("meals") or []
+    existing = [library.get(m["recipe_id"]) for m in meals if m.get("recipe_id")]
+    existing = [r for r in existing if r]
+    pool = library.all_active()
+    if not include_sc:
+        pool = [r for r in pool
+                if "slow_cooker" not in {(e or "").lower() for e in (r.get("equipment") or [])}]
+    extra = extend_lineup(existing, 1, eff_rules, pool,
+                          history=kv_get(KEY_HISTORY, []) or [])
+    if not extra:
+        st.session_state["mealplan_active_flash"] = (
+            "Couldn't find another recipe that fits your rules — try "
+            "growing the library or loosening exclusions.")
+        return
+    sr = extra[0]
+    meals.append({"recipe_id": sr.recipe.get("id"), "added_via": "manual_add"})
+    _save_plan_edit(plan, meals, f"Added {sr.recipe.get('title','a meal')}.")
+
+
+def _remove_meal(plan: dict, i: int):
+    """Drop slot ``i`` from the confirmed plan. Marks the grocery list stale."""
+    meals = plan.get("meals") or []
+    if not (0 <= i < len(meals)):
+        return
+    removed = library.get(meals[i].get("recipe_id")) if meals[i].get("recipe_id") else None
+    meals.pop(i)
+    _save_plan_edit(plan, meals,
+                    f"Removed {(removed or {}).get('title','a meal')} from the plan.")
+
+
+def _save_plan_edit(plan: dict, meals: list[dict], flash: str):
+    plan["meals"] = meals
+    plan["updated_at"] = datetime.now(timezone.utc).isoformat()
+    # The meal set changed → any previously generated grocery list is stale.
+    plan["grocery_list_generated_at"] = None
+    kv_put(KEY_CURRENT_PLAN, plan)
+    st.session_state["mealplan_active_flash"] = flash
+
+
+def _render_meal_card(i: int, slot: dict, rules: dict, plan: dict, can_remove: bool = True):
     rid = slot.get("recipe_id")
     recipe = library.get(rid) if rid else None
 
@@ -327,3 +390,8 @@ def _render_meal_card(i: int, slot: dict, rules: dict):
                                     use_container_width=True):
                 _recipe_view.open_preview(
                     recipe, _recipe_view.compute_scale(recipe, rules))
+            if st.button("✕ Remove", key=f"mp_active_remove_{i}",
+                         use_container_width=True, disabled=not can_remove,
+                         help=None if can_remove else "A plan needs at least one meal"):
+                _remove_meal(plan, i)
+                st.rerun()

@@ -172,6 +172,47 @@ def regenerate_lineup(
     return generate_lineup(n, rules, library, history=history, exclude_ids=prior_ids)
 
 
+def extend_lineup(
+    existing: list[dict],
+    n_more: int,
+    rules: dict,
+    library: list[dict],
+    history: list[dict] | None = None,
+    feedback: dict | None = None,
+) -> list[SlotResult]:
+    """Pick ``n_more`` additional slots that fit alongside the ``existing``
+    recipes, without disturbing them. Lets the propose/active screens grow a
+    plan in place (the user bumping "meals this week" up). Returns up to
+    ``n_more`` SlotResults — fewer if the eligible pool runs dry.
+    """
+    history = history or []
+    if feedback is None:
+        try:
+            from mealplan.event_log import feedback_signals
+            feedback = feedback_signals()
+        except Exception:
+            feedback = {}
+
+    pool = list(library)
+    chosen = [r for r in (existing or []) if r]
+    out: list[SlotResult] = []
+    for _ in range(max(0, int(n_more))):
+        picked, level = _pick_for_slot(
+            pool=pool, already_chosen=chosen, rules=rules, history=history,
+            exclude_ids=set(), feedback=feedback,
+        )
+        if picked is None:
+            break
+        recipe, score, reasons, relaxations = picked
+        out.append(SlotResult(
+            recipe=recipe, score=score, relaxation_level=level,
+            reasons=reasons, relaxations_applied=list(relaxations),
+            added_via=_classify_added_via(recipe, rules),
+        ))
+        chosen.append(recipe)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Per-slot selection
 # ---------------------------------------------------------------------------

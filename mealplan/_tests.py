@@ -486,6 +486,27 @@ def planner_tests(t: _T):
         # extremely unlikely to be top scorers.
         assert "burger_classic" not in ids or "chicken_parmesan" not in ids, ids
 
+    @t.case("extend_lineup grows a plan without disturbing or duplicating picks")
+    def _():
+        from mealplan.planner import extend_lineup
+        lib = synthetic_library()
+        base = generate_lineup(3, default_rules(), lib)
+        existing = base.recipes
+        extra = extend_lineup(existing, 2, default_rules(), lib)
+        assert len(extra) == 2, len(extra)
+        all_ids = [r["id"] for r in existing] + [s.recipe["id"] for s in extra]
+        assert len(all_ids) == len(set(all_ids)), all_ids  # no dupes
+
+    @t.case("extend_lineup stops cleanly when the pool can't fill the request")
+    def _():
+        from mealplan.planner import extend_lineup
+        lib = synthetic_library()
+        existing = generate_lineup(3, default_rules(), lib).recipes
+        # ask for far more than the library can supply → fewer returned, no raise
+        extra = extend_lineup(existing, 999, default_rules(), lib)
+        got = {r["id"] for r in existing} | {s.recipe["id"] for s in extra}
+        assert len(got) <= len(lib)
+
     @t.case("lineup_meta surfaces protein/cuisine/relaxation summary")
     def _():
         lib = synthetic_library()
@@ -737,29 +758,37 @@ def swap_tests(t: _T):
 # ---------------------------------------------------------------------------
 
 def equipment_target_tests(t: _T):
-    from mealplan.rules import evaluate_candidate, default_rules, validate_rules
+    from mealplan.rules import (
+        evaluate_candidate, default_rules, validate_rules, with_equipment_target,
+    )
 
     sc = R("sc1", cuisines=["thai"], proteins=["pork"], carbs=["rice"],
            equipment=["slow_cooker"])
+    on = with_equipment_target(default_rules(), "slow_cooker", True)
 
-    @t.case("slow-cooker recipe is boosted when none is in the lineup yet")
+    @t.case("slow-cooker is NOT forced by default rules (it's a per-plan option)")
     def _():
         ev = evaluate_candidate(sc, default_rules(), [], [], relaxation_level=0)
+        assert not any("slow_cooker target" in r for r in ev.reasons), ev.reasons
+
+    @t.case("with the option on, a slow-cooker recipe is boosted when none in lineup")
+    def _():
+        ev = evaluate_candidate(sc, on, [], [], relaxation_level=0)
         assert ev.eligible and any("slow_cooker target" in r for r in ev.reasons), ev.reasons
 
     @t.case("the boost stops once a slow-cooker meal is already in the lineup")
     def _():
         already = R("sc0", cuisines=["greek"], proteins=["beef"], carbs=["grain"],
                     equipment=["slow_cooker"])
-        ev = evaluate_candidate(sc, default_rules(), [already], [], relaxation_level=0)
+        ev = evaluate_candidate(sc, on, [already], [], relaxation_level=0)
         assert not any("slow_cooker target" in r for r in ev.reasons), ev.reasons
 
-    @t.case("the boost is relaxed away at level 3 (alongside must-include cuisine)")
+    @t.case("the boost is relaxed away at level 3")
     def _():
-        ev = evaluate_candidate(sc, default_rules(), [], [], relaxation_level=3)
+        ev = evaluate_candidate(sc, on, [], [], relaxation_level=3)
         assert not any("slow_cooker target" in r for r in ev.reasons), ev.reasons
 
-    @t.case("a generated plan includes a slow-cooker meal")
+    @t.case("with the option on, a generated plan includes a slow-cooker meal")
     def _():
         lib = synthetic_library() + [
             R("sc_a", cuisines=["american"], proteins=["beef"], carbs=["potato"],
@@ -767,9 +796,18 @@ def equipment_target_tests(t: _T):
             R("sc_b", cuisines=["mexican"], proteins=["pork"], carbs=["rice"],
               equipment=["slow_cooker"]),
         ]
-        res = generate_lineup(5, default_rules(), lib, history=[])
+        res = generate_lineup(5, on, lib, history=[])
         n_sc = sum(1 for s in res.slots if "slow_cooker" in (s.recipe.get("equipment") or []))
         assert n_sc >= 1, n_sc
+
+    @t.case("with_equipment_target toggles the target without mutating the original")
+    def _():
+        base = default_rules()
+        added = with_equipment_target(base, "slow_cooker", True)
+        assert "slow_cooker" in added["equipment"]["include_one_of_per_week"]
+        assert "slow_cooker" not in base["equipment"]["include_one_of_per_week"]  # unmutated
+        removed = with_equipment_target(added, "slow_cooker", False)
+        assert "slow_cooker" not in removed["equipment"]["include_one_of_per_week"]
 
     @t.case("validate_rules accepts the equipment block, rejects a non-list")
     def _():

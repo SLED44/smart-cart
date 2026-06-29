@@ -167,6 +167,8 @@ def default_rules() -> dict:
             "spice":                   "mild",
             "default_appliance":       "air_fryer",
             "buy_dont_make_sauces":    True,
+            "slow_cooker_default":     True,  # default state of the per-plan
+                                              # "include a slow-cooker meal" toggle
         },
         "protein_limits": {
             # max_per_week = soft cap (-30 score penalty if exceeded)
@@ -202,9 +204,11 @@ def default_rules() -> dict:
             "forbid_back_to_back_same_cuisine": True,
         },
         "equipment": {
-            # Bias one meal per week onto a target appliance. Slow-cooker night
-            # is a standing household want (2026-06-27): a hands-off dinner.
-            "include_one_of_per_week": ["slow_cooker"],
+            # Per-plan option, NOT a standing rule. The propose/home screens add
+            # "slow_cooker" here for a single generation when the user ticks
+            # "include a slow-cooker meal" (default from household.slow_cooker_default).
+            # Empty by default so no code path (e.g. swap) silently forces it.
+            "include_one_of_per_week": [],
         },
         "favorites": [],
         "exclusions": [],
@@ -220,6 +224,19 @@ def default_rules() -> dict:
 # ---------------------------------------------------------------------------
 # Persistence
 # ---------------------------------------------------------------------------
+
+def with_equipment_target(rules: dict, target: str, include: bool) -> dict:
+    """Return a shallow copy of ``rules`` with ``target`` added to or removed
+    from ``equipment.include_one_of_per_week``. Lets a screen turn the weekly
+    slow-cooker target on/off for a single plan without mutating saved rules —
+    the slow-cooker meal is a per-plan option, not a hard rule."""
+    eq = dict(rules.get("equipment") or {})
+    targets = [t for t in (eq.get("include_one_of_per_week") or []) if t != target]
+    if include:
+        targets.append(target)
+    eq["include_one_of_per_week"] = targets
+    return {**rules, "equipment": eq}
+
 
 def load_rules() -> dict:
     """Read from KV; return defaults if unset. The returned dict is merged

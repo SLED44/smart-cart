@@ -25,11 +25,17 @@ from mealplan.event_log import (
 from mealplan.planner import (
     NoCandidatesError,
     SlotResult,
+    extend_lineup,
     generate_lineup,
     lineup_meta,
     regenerate_lineup,
 )
-from mealplan.rules import bump_state_after_confirm, load_rules, save_rules
+from mealplan.rules import (
+    bump_state_after_confirm,
+    load_rules,
+    save_rules,
+    with_equipment_target,
+)
 from supabase_kv import kv_delete, kv_get, kv_put
 
 from screens._shared import go
@@ -65,6 +71,12 @@ def render():
     n = int(pending.get("n") or len(pending.get("meals") or []))
     meals = pending.get("meals") or []
 
+    # Slow-cooker is a per-plan option, not a hard rule. `eff_rules` applies the
+    # plan's choice to generation/meta; the original `rules` is kept for the
+    # state bump on confirm (so we never persist the per-plan override).
+    include_sc = bool(pending.get("include_slow_cooker", _sc_default(rules)))
+    eff_rules = with_equipment_target(rules, "slow_cooker", include_sc)
+
     # Top action bar
     col_back, col_reroll, col_confirm = st.columns([1, 2, 2])
     with col_back:
@@ -73,16 +85,40 @@ def render():
     with col_reroll:
         if st.button(f"🔄 Give me {n} new options",
                      use_container_width=True, key="mp_propose_reroll"):
-            _reroll(n, rules, meals)
+            _reroll(n, eff_rules, meals, include_sc)
     with col_confirm:
         all_filled = all(m.get("recipe_id") for m in meals)
         if st.button("✓ Confirm plan", type="primary",
                      disabled=not all_filled, use_container_width=True,
                      key="mp_propose_confirm"):
-            _confirm(meals, rules)
+            _confirm(meals, rules, include_sc)
             return
 
-    st.caption(f"{sum(1 for m in meals if m.get('recipe_id'))} / {n} slots filled")
+    # Plan controls — adjust the size and the slow-cooker option along the way.
+    # Resizing keeps existing picks; toggling slow-cooker is structural so it
+    # regenerates the lineup under the new setting.
+    col_n, col_sc = st.columns([1, 2])
+    with col_n:
+        new_n = int(st.number_input(
+            "Meals this week", min_value=1, max_value=7, value=n, step=1,
+            key="mp_propose_n_adjust",
+        ))
+    with col_sc:
+        new_sc = st.checkbox("🍲 Include a slow-cooker meal",
+                             value=include_sc, key="mp_propose_sc")
+    st.caption(f"{sum(1 for m in meals if m.get('recipe_id'))} / {len(meals)} slots filled")
+
+    if new_sc != include_sc:
+        regen = _generate_pending(len(meals) or n,
+                                  with_equipment_target(rules, "slow_cooker", new_sc),
+                                  include_sc=new_sc)
+        if regen is not None:
+            regen["include_slow_cooker"] = new_sc
+            kv_put(KEY_PENDING_LINEUP, regen)
+        st.rerun()
+    if new_n != len(meals):
+        _resize_pending(pending, new_n, eff_rules, include_sc=include_sc)
+        st.rerun()
 
     # Fetch the library once per render and index into it — library.get() is a
     # full KV round-trip, and this screen resolves the same recipes several
@@ -90,7 +126,7 @@ def render():
     lib = library.get_all()
 
     # "Why these picks?" — recompute lineup_meta from current recipes
-    _render_why_panel(meals, rules, lib)
+    _render_why_panel(meals, eff_rules, lib)
 
     st.divider()
 
@@ -105,14 +141,27 @@ def render():
 # Generation / loading
 # ---------------------------------------------------------------------------
 
+def _sc_default(rules: dict) -> bool:
+    """Default state of the per-plan slow-cooker toggle (household preference)."""
+    return bool((rules.get("household") or {}).get("slow_cooker_default", True))
+
+
 def _load_or_generate(rules: dict) -> dict | None:
     """Return the pending lineup dict, generating if entered from home fresh."""
     if st.session_state.pop("mealplan_propose_fresh", False):
+        # Reset the per-plan controls so they re-seed for the new plan rather
+        # than carrying values from a previous one.
+        st.session_state.pop("mp_propose_n_adjust", None)
+        st.session_state.pop("mp_propose_sc", None)
         n = int(st.session_state.pop("mealplan_propose_n", None)
                 or (rules.get("household") or {}).get("meals_per_week_default") or 5)
-        pending = _generate_pending(n, rules)
+        include_sc = bool(st.session_state.pop("mealplan_propose_include_sc",
+                                               _sc_default(rules)))
+        pending = _generate_pending(n, with_equipment_target(rules, "slow_cooker", include_sc),
+                                    include_sc=include_sc)
         if pending is None:
             return None
+        pending["include_slow_cooker"] = include_sc
         kv_put(KEY_PENDING_LINEUP, pending)
         return pending
 
@@ -126,9 +175,42 @@ def _load_or_generate(rules: dict) -> dict | None:
     return pending
 
 
-def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None) -> dict | None:
-    """Run the planner and wrap the result in a pending_lineup dict."""
+def _resize_pending(pending: dict, new_n: int, rules: dict, include_sc: bool = True) -> None:
+    """Grow or shrink the pending lineup to ``new_n`` slots in place, keeping
+    the picks already made. Growing pulls additional fitting recipes; shrinking
+    trims from the end. Persists to KV."""
+    meals = pending.get("meals") or []
+    cur = len(meals)
+    if new_n < cur:
+        meals = meals[:new_n]
+    elif new_n > cur:
+        existing = [library.get(m["recipe_id"]) for m in meals if m.get("recipe_id")]
+        existing = [r for r in existing if r]
+        history = kv_get(KEY_HISTORY, []) or []
+        extra = extend_lineup(existing, new_n - cur, rules, _active_pool(include_sc),
+                              history=history)
+        meals = meals + [_slot_to_dict(cur + i, s) for i, s in enumerate(extra)]
+    pending["n"] = len(meals)
+    pending["meals"] = meals
+    pending["updated_at"] = _now_iso()
+    kv_put(KEY_PENDING_LINEUP, pending)
+
+
+def _active_pool(include_sc: bool) -> list[dict]:
+    """Active recipes for planning. When the slow-cooker option is off, drop
+    slow-cooker recipes so 'don't include one' actually means none appear (not
+    just 'no bonus'). Toggle ON keeps the full pool + the +score bias."""
     pool = library.all_active()
+    if include_sc:
+        return pool
+    return [r for r in pool
+            if "slow_cooker" not in {(e or "").lower() for e in (r.get("equipment") or [])}]
+
+
+def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None,
+                      include_sc: bool = True) -> dict | None:
+    """Run the planner and wrap the result in a pending_lineup dict."""
+    pool = _active_pool(include_sc)
     if not pool:
         st.error("Library is empty. Run **🌱 Bootstrap library** first (home → Settings).")
         if st.button("← Back to home", key="mp_propose_empty"):
@@ -186,10 +268,10 @@ def _slot_to_dict(i: int, s: SlotResult) -> dict:
     }
 
 
-def _reroll(n: int, rules: dict, current_meals: list[dict]):
+def _reroll(n: int, rules: dict, current_meals: list[dict], include_sc: bool = True):
     prior_ids = {m.get("recipe_id") for m in current_meals if m.get("recipe_id")}
     with st.spinner("Rerolling lineup…"):
-        new_pending = _generate_pending(n, rules, exclude_ids=prior_ids)
+        new_pending = _generate_pending(n, rules, exclude_ids=prior_ids, include_sc=include_sc)
     if new_pending is not None:
         # Telemetry — separate from plan_proposed so summary can count
         # rerolls distinctly.
@@ -198,6 +280,7 @@ def _reroll(n: int, rules: dict, current_meals: list[dict]):
             "new_recipe_ids":   [m["recipe_id"] for m in new_pending["meals"]
                                  if m.get("recipe_id")],
         })
+        new_pending["include_slow_cooker"] = include_sc
         kv_put(KEY_PENDING_LINEUP, new_pending)
     st.rerun()
 
@@ -338,7 +421,7 @@ def _render_why_panel(meals: list[dict], rules: dict, lib: dict):
 # Confirm
 # ---------------------------------------------------------------------------
 
-def _confirm(meals: list[dict], rules: dict):
+def _confirm(meals: list[dict], rules: dict, include_sc: bool = True):
     lib = library.get_all()  # one fetch; reused for recipes + telemetry titles
     recipes = []
     for m in meals:
@@ -359,6 +442,7 @@ def _confirm(meals: list[dict], rules: dict):
             {"recipe_id": m["recipe_id"], "added_via": m.get("added_via", "proposal")}
             for m in meals
         ],
+        "include_slow_cooker":       include_sc,
         "grocery_list_generated_at": None,
     }
     kv_put(KEY_CURRENT_PLAN, plan)

@@ -106,14 +106,22 @@ def _render_plan_new_section(summary: dict, rules: dict):
         key="mph_plan_n",
     ))
 
+    sc_default = bool((rules.get("household") or {}).get("slow_cooker_default", True))
+    include_sc = st.checkbox(
+        "🍲 Include a slow-cooker meal this plan",
+        value=sc_default, key="mph_plan_sc",
+        help="When on, the planner works one hands-off slow-cooker dinner into the week.",
+    )
+
     disabled = summary["total"] == 0
     if st.button(
         f"Plan {n} meal{'s' if n != 1 else ''} →",
         type="primary", use_container_width=True,
         disabled=disabled, key="mph_plan_start",
     ):
-        # Stash N for the propose screen; it'll generate the lineup on entry.
+        # Stash N + the slow-cooker choice for the propose screen.
         st.session_state.mealplan_propose_n = n
+        st.session_state.mealplan_propose_include_sc = include_sc
         st.session_state.mealplan_propose_fresh = True  # propose screen sees this
                                                         # → generate, then clear
         go("mealplan_propose")
@@ -188,6 +196,8 @@ def _render_current_plan_section(current: dict):
             # no pending lineup) it dead-ends on "No plan in progress". Plan the
             # same number of meals as the current week.
             st.session_state.mealplan_propose_n = len(current.get("meals") or []) or 5
+            if "include_slow_cooker" in current:
+                st.session_state.mealplan_propose_include_sc = bool(current["include_slow_cooker"])
             st.session_state.mealplan_propose_fresh = True
             go("mealplan_propose")
 
