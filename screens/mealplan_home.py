@@ -184,6 +184,18 @@ def _render_current_plan_section(current: dict):
         recipes=recipes,
     ))
 
+    # Size the next week up front, so you don't generate 5 when you need 2.
+    col_n, col_sc = st.columns([1, 2])
+    with col_n:
+        replan_n = int(st.number_input(
+            "Meals next week", min_value=1, max_value=7,
+            value=len(meals) or 5, step=1, key="mph_replan_n"))
+    with col_sc:
+        replan_sc = st.checkbox(
+            "🍲 Include a slow-cooker meal",
+            value=bool(current.get("include_slow_cooker", True)),
+            key="mph_replan_sc")
+
     col_active, col_new = st.columns([2, 1])
     with col_active:
         if st.button("📅 Open this week's plan", type="primary",
@@ -193,11 +205,9 @@ def _render_current_plan_section(current: dict):
         if st.button("🔄 Plan a new week",
                      use_container_width=True, key="mph_replan"):
             # propose only generates when this flag is set; without it (and with
-            # no pending lineup) it dead-ends on "No plan in progress". Plan the
-            # same number of meals as the current week.
-            st.session_state.mealplan_propose_n = len(current.get("meals") or []) or 5
-            if "include_slow_cooker" in current:
-                st.session_state.mealplan_propose_include_sc = bool(current["include_slow_cooker"])
+            # no pending lineup) it dead-ends on "No plan in progress".
+            st.session_state.mealplan_propose_n = replan_n
+            st.session_state.mealplan_propose_include_sc = replan_sc
             st.session_state.mealplan_propose_fresh = True
             go("mealplan_propose")
 
