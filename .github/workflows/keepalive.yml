@@ -1,44 +1,86 @@
 name: Supabase keep-alive
 
-# Supabase free-tier pauses projects after 7 days of zero database activity.
-# This workflow makes a single PostgREST request twice a week (Sun + Thu)
-# so the inactivity clock never reaches 7 days.
+# Supabase free-tier pauses projects after 7 days without "sufficient activity".
+# History: the original version of this workflow did a read-only GET twice a
+# week — Supabase kept sending pause warnings anyway (July 2026), because
+# trivial read pings no longer reliably count as activity. This version:
+#
+#   1. Runs DAILY, so one failed run costs 1 of 7 days of margin, not 3.5.
+#   2. Does a real WRITE (upsert of kv key "keepalive:last_ping"), which
+#      registers as genuine Postgres activity.
+#   3. Reads the row back and fails loudly if the write didn't stick —
+#      a green run now proves the database actually saw activity.
+#   4. Re-enables itself via the GitHub API each run, resetting GitHub's
+#      own 60-day "disable scheduled workflows in inactive repos" timer.
 #
 # Requires repo secrets (Settings → Secrets and variables → Actions):
 #   SUPABASE_URL          e.g. https://odwkznptayhobwjgegin.supabase.co
 #   SUPABASE_SERVICE_KEY  service_role secret from Supabase dashboard
 #
-# Run history visible at: github.com/<owner>/<repo>/actions
+# Run history: github.com/SLED44/smart-cart/actions
 
 on:
   schedule:
-    # Sunday + Thursday at 14:00 UTC. Twice a week → max ~4 days between
-    # pings, comfortably under Supabase's 7-day inactivity window.
-    - cron: "0 14 * * 0,4"
+    # Daily at 09:23 UTC. Off-the-hour minute because GitHub delays/drops
+    # crons scheduled at :00 during peak congestion.
+    - cron: "23 9 * * *"
   workflow_dispatch:  # allow manual runs from the Actions tab
+
+permissions:
+  actions: write  # needed by the self re-enable step
 
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Supabase REST API
+      - name: Write + verify keep-alive row
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
           if [ -z "${SUPABASE_URL}" ] || [ -z "${SUPABASE_SERVICE_KEY}" ]; then
             echo "::error::Missing SUPABASE_URL or SUPABASE_SERVICE_KEY secret"
             exit 1
           fi
-          # HEAD on the kv table — minimal payload, but registers as DB activity.
-          status=$(curl -sS -o /dev/null -w "%{http_code}" \
-            -X GET "${SUPABASE_URL}/rest/v1/kv?select=key&limit=1" \
+
+          nonce="run-${RUN_ID}-$(date -u +%Y%m%dT%H%M%SZ)"
+
+          # Upsert — a real INSERT/UPDATE, which counts as database activity.
+          status=$(curl -sS -o /tmp/write_body -w "%{http_code}" \
+            -X POST "${SUPABASE_URL}/rest/v1/kv" \
             -H "apikey: ${SUPABASE_SERVICE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}")
-          echo "Supabase responded with HTTP ${status}"
-          if [ "${status}" != "200" ]; then
-            echo "::error::Unexpected status. Project may be paused or secrets are wrong."
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+            -H "Content-Type: application/json" \
+            -H "Prefer: resolution=merge-duplicates" \
+            -d "[{\"key\":\"keepalive:last_ping\",\"value\":{\"nonce\":\"${nonce}\"}}]")
+          echo "Write responded with HTTP ${status}"
+          if [ "${status}" != "201" ] && [ "${status}" != "200" ]; then
+            cat /tmp/write_body
+            echo "::error::Keep-alive write failed. Project may be paused or secrets are wrong."
             exit 1
           fi
-          echo "✓ keep-alive successful"
+
+          # Read the row back — a green run must mean Postgres really saw the write.
+          body=$(curl -sS \
+            "${SUPABASE_URL}/rest/v1/kv?key=eq.keepalive%3Alast_ping&select=value" \
+            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}")
+          if ! printf '%s' "${body}" | grep -q "${nonce}"; then
+            echo "Read-back body: ${body}"
+            echo "::error::Write did not verify — read-back is missing this run's nonce."
+            exit 1
+          fi
+          echo "✓ keep-alive write verified (${nonce})"
+
+      # GitHub disables scheduled workflows after 60 days without repo
+      # activity. Re-enabling via the API resets that timer, so the cron
+      # keeps firing even if nothing is committed for months.
+      - name: Reset GitHub's 60-day scheduled-workflow disable timer
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PUT \
+            "repos/${{ github.repository }}/actions/workflows/keepalive.yml/enable"
+          echo "✓ workflow re-enabled (60-day timer reset)"
