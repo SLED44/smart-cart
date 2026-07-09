@@ -1,21 +1,32 @@
 name: Supabase keep-alive
 
 # Supabase free-tier pauses projects after 7 days without "sufficient activity".
-# History: the original version of this workflow did a read-only GET twice a
-# week — Supabase kept sending pause warnings anyway (July 2026), because
-# trivial read pings no longer reliably count as activity. This version:
 #
-#   1. Runs DAILY, so one failed run costs 1 of 7 days of margin, not 3.5.
-#   2. Does a real WRITE (upsert of kv key "keepalive:last_ping"), which
-#      registers as genuine Postgres activity.
-#   3. Reads the row back and fails loudly if the write didn't stick —
-#      a green run now proves the database actually saw activity.
-#   4. Re-enables itself via the GitHub API each run, resetting GitHub's
-#      own 60-day "disable scheduled workflows in inactive repos" timer.
+# History:
+#   - v1 did a read-only GET twice a week — Supabase sent pause warnings anyway
+#     (July 2026): trivial read pings don't count as activity.
+#   - v2 did a daily verified WRITE — Supabase paused the project anyway on
+#     2026-07-08, one minute AFTER a successful verified write. Once their
+#     scanner flags a project, the pause apparently proceeds regardless.
 #
-# Requires repo secrets (Settings → Secrets and variables → Actions):
-#   SUPABASE_URL          e.g. https://odwkznptayhobwjgegin.supabase.co
-#   SUPABASE_SERVICE_KEY  service_role secret from Supabase dashboard
+# So v3 stops trying to merely prevent the pause and makes the system
+# self-healing:
+#
+#   1. Daily verified write (real Postgres activity, read-back nonce check).
+#   2. If the write fails because the project is paused, restore it via the
+#      Supabase Management API, wait for it to come healthy, and retry the
+#      write. The run only fails if restore itself fails — which is when a
+#      human actually needs to look (GitHub emails the repo owner on failure).
+#   3. Each run re-enables this workflow via the GitHub API, resetting
+#      GitHub's 60-day "disable scheduled workflows in inactive repos" timer.
+#
+# Required repo secrets (Settings → Secrets and variables → Actions):
+#   SUPABASE_URL           e.g. https://odwkznptayhobwjgegin.supabase.co
+#   SUPABASE_SERVICE_KEY   service_role secret from Supabase dashboard
+#   SUPABASE_ACCESS_TOKEN  personal access token (dashboard → Account → Access
+#                          Tokens) — needed only for the auto-restore path.
+#                          Note: PATs don't expire but CAN be revoked; if
+#                          auto-restore starts failing with 401, mint a new one.
 #
 # Run history: github.com/SLED44/smart-cart/actions
 
@@ -33,10 +44,11 @@ jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Write + verify keep-alive row
+      - name: Keep-alive write (auto-restore if paused)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           RUN_ID: ${{ github.run_id }}
         run: |
           set -euo pipefail
@@ -45,34 +57,84 @@ jobs:
             exit 1
           fi
 
+          ref=$(echo "${SUPABASE_URL}" | sed -E 's#https?://([^.]+)\..*#\1#')
           nonce="run-${RUN_ID}-$(date -u +%Y%m%dT%H%M%SZ)"
 
-          # Upsert — a real INSERT/UPDATE, which counts as database activity.
-          status=$(curl -sS -o /tmp/write_body -w "%{http_code}" \
-            -X POST "${SUPABASE_URL}/rest/v1/kv" \
-            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
-            -H "Content-Type: application/json" \
-            -H "Prefer: resolution=merge-duplicates" \
-            -d "[{\"key\":\"keepalive:last_ping\",\"value\":{\"nonce\":\"${nonce}\"}}]")
-          echo "Write responded with HTTP ${status}"
-          if [ "${status}" != "201" ] && [ "${status}" != "200" ]; then
-            cat /tmp/write_body
-            echo "::error::Keep-alive write failed. Project may be paused or secrets are wrong."
+          # Upsert + read-back verify. Returns 0 only if Postgres provably
+          # processed this run's write.
+          write_and_verify() {
+            local status body
+            status=$(curl -sS -o /tmp/write_body -w "%{http_code}" --max-time 30 \
+              -X POST "${SUPABASE_URL}/rest/v1/kv" \
+              -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" \
+              -H "Content-Type: application/json" \
+              -H "Prefer: resolution=merge-duplicates" \
+              -d "[{\"key\":\"keepalive:last_ping\",\"value\":{\"nonce\":\"${nonce}\"}}]" \
+              || echo "000")
+            echo "Write responded with HTTP ${status}"
+            if [ "${status}" != "201" ] && [ "${status}" != "200" ]; then
+              cat /tmp/write_body 2>/dev/null || true
+              return 1
+            fi
+            body=$(curl -sS --max-time 30 \
+              "${SUPABASE_URL}/rest/v1/kv?key=eq.keepalive%3Alast_ping&select=value" \
+              -H "apikey: ${SUPABASE_SERVICE_KEY}" \
+              -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}" || true)
+            if ! printf '%s' "${body}" | grep -q "${nonce}"; then
+              echo "Read-back body: ${body}"
+              return 1
+            fi
+            return 0
+          }
+
+          if write_and_verify; then
+            echo "✓ keep-alive write verified (${nonce})"
+            exit 0
+          fi
+
+          echo "Write failed — project is likely paused. Attempting restore."
+          if [ -z "${SUPABASE_ACCESS_TOKEN}" ]; then
+            echo "::error::Project appears paused and SUPABASE_ACCESS_TOKEN is not set, so auto-restore can't run. Restore manually at https://supabase.com/dashboard/project/${ref} and add the secret (dashboard → Account → Access Tokens)."
             exit 1
           fi
 
-          # Read the row back — a green run must mean Postgres really saw the write.
-          body=$(curl -sS \
-            "${SUPABASE_URL}/rest/v1/kv?key=eq.keepalive%3Alast_ping&select=value" \
-            -H "apikey: ${SUPABASE_SERVICE_KEY}" \
-            -H "Authorization: Bearer ${SUPABASE_SERVICE_KEY}")
-          if ! printf '%s' "${body}" | grep -q "${nonce}"; then
-            echo "Read-back body: ${body}"
-            echo "::error::Write did not verify — read-back is missing this run's nonce."
-            exit 1
+          restore_status=$(curl -sS -o /tmp/restore_body -w "%{http_code}" --max-time 30 \
+            -X POST "https://api.supabase.com/v1/projects/${ref}/restore" \
+            -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+            -H "Content-Type: application/json" -d '{}' || echo "000")
+          echo "Restore request responded with HTTP ${restore_status}"
+          case "${restore_status}" in
+            2*) ;;  # accepted
+            *)
+              cat /tmp/restore_body 2>/dev/null || true
+              echo "::error::Restore request failed. Restore manually: https://supabase.com/dashboard/project/${ref}"
+              exit 1
+              ;;
+          esac
+
+          # Restores take a few minutes. Poll up to 15 min for ACTIVE_HEALTHY.
+          for i in $(seq 1 45); do
+            sleep 20
+            proj_status=$(curl -sS --max-time 30 \
+              "https://api.supabase.com/v1/projects/${ref}" \
+              -H "Authorization: Bearer ${SUPABASE_ACCESS_TOKEN}" \
+              | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status",""))' \
+              || echo "UNKNOWN")
+            echo "Poll ${i}: project status = ${proj_status}"
+            if [ "${proj_status}" = "ACTIVE_HEALTHY" ]; then
+              break
+            fi
+          done
+
+          # Give PostgREST a moment after the DB reports healthy, then retry.
+          sleep 30
+          if write_and_verify; then
+            echo "✓ project auto-restored and keep-alive write verified (${nonce})"
+            exit 0
           fi
-          echo "✓ keep-alive write verified (${nonce})"
+          echo "::error::Restore was requested but the keep-alive write still fails. Check https://supabase.com/dashboard/project/${ref}"
+          exit 1
 
       # GitHub disables scheduled workflows after 60 days without repo
       # activity. Re-enabling via the API resets that timer, so the cron
