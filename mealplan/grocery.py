@@ -29,6 +29,7 @@ V1 scope decisions (per PRD §12.4):
 import re
 
 from preference_store import normalise_item_key, get_preference
+from recipe_units import round_quantity
 from mealplan import library as _library
 
 
@@ -225,7 +226,7 @@ def aggregate_grocery_list(
         out.append({
             "item_name":      item_name,
             "item_key":       item_key,
-            "quantity":       _round_qty(m["amount"]),
+            "quantity":       round_quantity(m["amount"], m["unit"], m["display_name"]),
             "unit":           m["unit"],
             "category":       category,
             "notes":          ", ".join(m["sources"]),
@@ -236,13 +237,6 @@ def aggregate_grocery_list(
 
     out.sort(key=lambda i: (_category_sort_key(i["category"]), i["item_name"].lower()))
     return out
-
-
-def _round_qty(q: float) -> float:
-    """Trim noisy fractional scaling to 2 dp (e.g. 0.6666666 → 0.67)."""
-    if q == int(q):
-        return float(int(q))
-    return round(q, 2)
 
 
 # ---------------------------------------------------------------------------

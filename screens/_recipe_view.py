@@ -15,7 +15,6 @@ Public surface:
     open_preview(recipe, scale)         -> None  (@st.dialog modal)
 """
 
-import math
 import re
 
 import streamlit as st
@@ -69,57 +68,13 @@ def fmt_amount(q: float) -> str:
     return f"{q:.2f}".rstrip("0").rstrip(".")
 
 
-# Units that describe a whole, indivisible purchase item. Scaling these to a
-# fraction ("0.8 count tomatoes", "1.6 cans beans") reads as nonsense — you buy
-# whole cans / onions / limes. For these we round to a sensible whole number
-# (min 1) and, when rounding lands back on the original count, fall back to the
-# original_text phrasing (which also carries can sizes and the word "canned").
-_DISCRETE_UNITS = {
-    "count", "can", "cans", "clove", "cloves", "package", "packages", "pkg",
-    "stick", "sticks", "head", "heads", "slice", "slices", "loaf", "loaves",
-    "ear", "ears", "sprig", "sprigs", "bunch", "bunches",
-    "large", "medium", "small",
-}
-
-
-def _round_step(unit: str) -> float:
-    """Granularity a scaled amount snaps to, so a cook never reads "3.2 cup" or
-    "0.2 tsp". Returns the smallest increment we'll show for `unit`."""
-    u = unit.lower()
-    if u in ("lb", "lbs", "pound", "pounds"):
-        return 0.5          # half-pound is the cutoff — never 1.25 lb
-    if u in ("oz", "ounce", "ounces", "fl oz", "floz"):
-        return 1.0          # whole ounces
-    if u in ("cup", "cups"):
-        return 0.25         # quarter-cup measuring marks
-    if u in ("tsp", "teaspoon", "teaspoons", "tbsp", "tbsps", "tbsp.",
-             "tablespoon", "tablespoons"):
-        return 0.25         # quarter-spoon
-    return 0.25             # generic default — keep everything on nice fractions
-
-
-def _round_to(value: float, step: float) -> float:
-    """Round half-up to the nearest `step` (Python's round() is banker's, which
-    surprises in a kitchen: round(2.5) == 2)."""
-    return math.floor(value / step + 0.5) * step
-
-
-# Whole, countable items that should never render as a fraction even when the
-# imported `unit` is blank or "count" (e.g. "¾ bell pepper"). Matched as whole
-# words against the ingredient name. NOTE: kept to clearly-countable nouns —
-# bare "pepper" is excluded so "black pepper" stays measurable.
-_WHOLE_ITEMS = (
-    "onion", "bell pepper", "poblano", "jalapeno", "jalapeño", "lime", "lemon",
-    "egg", "avocado", "zucchini", "cucumber", "carrot", "shallot", "scallion",
-    "green onion", "tortilla", "bun", "roll", "pita", "naan", "potato",
-    "sweet potato", "bay leaf", "chicken thigh", "chicken breast",
-    "chicken tenderloin", "pork chop", "corn tortilla", "flour tortilla",
-    "eggplant", "leek", "artichoke",
+# Whole-purchase units, whole-item detection, and the kitchen rounding helpers
+# live in recipe_units so the grocery aggregator can reuse the exact same rules
+# (one source of truth — the shopping list can't disagree with the cook screen).
+from recipe_units import (  # noqa: E402
+    _DISCRETE_UNITS, _WHOLE_ITEMS, _WHOLE_RE, _is_whole_item,
+    _round_step, _round_to,
 )
-# Match singular or plural ("chicken thigh" → "chicken thighs", "potato" →
-# "potatoes"), but not substrings ("egg" must not hit "eggplant").
-_WHOLE_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(w) for w in _WHOLE_ITEMS) + r")(?:e?s)?\b", re.I)
 
 # A row is a can/jar sold whole when the text names a can or carries a package
 # size like "(15 oz)" / "15-oz can". For these the stored amount is the package
