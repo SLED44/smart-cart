@@ -6,6 +6,12 @@
 data/
 legacy_snapshot.json
 smartcart_backup_*.json
+lib_backup_*.json
+
+# Local working material — scraped recipe pages/PDFs and design-handoff HTML,
+# reference only, not app source
+Recipes/
+design_handoff_meal_planner/
 
 # Kroger app credentials export
 App Registration Details*.pdf
