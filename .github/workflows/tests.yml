@@ -1,0 +1,27 @@
+# Runs the meal-planner test suite on every push and PR.
+#
+# The suite (mealplan/_tests.py) is deliberately network-free — synthetic
+# recipe library, no Supabase, no LLM — so no secrets are needed here.
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  mealplan-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          # Matches the dev machine (3.10.4) the suite is verified against.
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run meal-planner tests
+        run: python3 -m mealplan._tests
