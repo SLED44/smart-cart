@@ -611,9 +611,35 @@ def recipe_view_tests(t: _T):
         tiny = {"amount": 0.25, "unit": "tsp", "name": "cayenne", "original_text": ""}
         assert format_ingredient_line(tiny, 0.1).strip() == "**¼** tsp cayenne"
 
-    @t.case("unscaled recipe shows original_text verbatim")
+    @t.case("unscaled recipe shows original_text, re-attaching a missing name")
     def _():
-        assert format_ingredient_line(can_tomato, 1.0) == "1 (28-oz) can"
+        # name absent from original_text → prefixed; present → shown verbatim
+        assert format_ingredient_line(can_tomato, 1.0) == \
+            "whole peeled tomatoes — 1 (28-oz) can"
+        assert format_ingredient_line(cloves, 1.0) == \
+            "4 garlic cloves, thinly sliced"
+
+    @t.case("name-less original_text fragments never render alone")
+    def _():
+        # Live bug (Sticky Miso Salmon Bowls, 2026-07): pasted recipes carried
+        # fragments like "zest + 1 tbsp juice" / "sliced, for serving" with the
+        # food only in `name` — the cook screen showed the fragment by itself.
+        zest = {"amount": 1, "unit": "tbsp", "name": "grapefruit",
+                "original_text": "zest + 1 tbsp juice"}
+        assert format_ingredient_line(zest, 1.0) == \
+            "grapefruit — zest + 1 tbsp juice"
+        cuke = {"amount": 1, "unit": "count", "name": "cucumber",
+                "original_text": "sliced, for serving"}
+        assert format_ingredient_line(cuke, 1.0) == \
+            "cucumber — sliced, for serving"
+        # discrete path at ≠1× keeps the name too (count unchanged → original)
+        assert format_ingredient_line(cuke, 0.8) == \
+            "cucumber — sliced, for serving"
+        # amountless 'servings' placeholder rows get the same treatment
+        lime = {"amount": 0, "unit": "servings", "name": "lime",
+                "original_text": "wedges, for serving"}
+        assert format_ingredient_line(lime, 1.0) == \
+            "lime — wedges, for serving"
 
     @t.case("whole produce with a blank unit never renders as a fraction")
     def _():
@@ -688,6 +714,22 @@ def grocery_addon_tests(t: _T):
         r2 = dict(recipe, id="r2", title="Other")
         addons = grocery.collect_optional_addons(["r1", "r2"], 4, library=_Lib([recipe, r2]))
         assert sum(a["name"] == "side salad" for a in addons) == 1
+
+    @t.case("addon display re-attaches a name missing from original_text")
+    def _():
+        r3 = {
+            "id": "r3", "title": "Fragments", "servings_original": 4,
+            "ingredients": [
+                ing("lime", "serving", "wedges, for serving", "Produce"),
+                ing("thyme leaves", "serving",
+                    "Fresh thyme leaves for garnish", "Produce"),
+            ],
+        }
+        addons = grocery.collect_optional_addons(["r3"], 4, library=_Lib([r3]))
+        by_name = {a["name"]: a["display"] for a in addons}
+        assert by_name["lime"] == "lime — wedges, for serving", by_name
+        # name already present → verbatim
+        assert by_name["thyme leaves"] == "Fresh thyme leaves for garnish", by_name
 
     @t.case("addon_to_item produces a hand-off-ready SmartCart Item")
     def _():

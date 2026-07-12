@@ -112,8 +112,11 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
 
     - Spoonacular 'servings'-unit rows are amountless placeholders (to-taste
       items, leaked section headers) → no fake amount.
-    - Unscaled recipe + original_text present → show original_text verbatim
-      (natural phrasing, e.g. '1 1/2 tablespoons soy sauce').
+    - Unscaled recipe + original_text present → show original_text (natural
+      phrasing, e.g. '1 1/2 tablespoons soy sauce').
+    - Every original_text path runs through _with_name(): pasted recipes carry
+      fragments like "zest + 1 tbsp juice" or "sliced, for serving" with the
+      food only in `name`, and the fragment alone tells the cook nothing.
     - Discrete whole-item units (cans, cloves, count, …) → round the scaled
       amount to a whole number (min 1) instead of showing a fractional can.
       When the rounded count equals the original whole count, show original_text
@@ -121,20 +124,22 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
     - Otherwise scaled → kitchen-fraction amount + unit + name; original_text is
       omitted because its numbers contradict the scaled ones.
     """
-    name = ing.get("name") or "(unknown)"
+    name = (ing.get("name") or "").strip()
     unit = (ing.get("unit") or "").strip()
     original = (ing.get("original_text") or "").strip()
 
     if unit.lower() in ("serving", "servings"):
-        return original if original else f"{name} — to taste / as needed"
+        if original:
+            return _with_name(original, name)
+        return f"{name or '(unknown)'} — to taste / as needed"
 
     if scale == 1.0 and original:
-        return original
+        return _with_name(original, name)
 
     raw_amount = float(ing.get("amount") or 0)
     scaled_amount = raw_amount * scale
     if not scaled_amount:
-        return original or name
+        return _with_name(original, name) if original else (name or "(unknown)")
 
     # Cans/jars measured by package size (e.g. "15 oz" of crushed tomatoes) —
     # the number is the can's size, not a count we can scale. Show the original
@@ -153,14 +158,15 @@ def format_ingredient_line(ing: dict, scale: float) -> str:
             return _with_name(original, name)
         # "count" is an internal placeholder, not a word a cook wants to read.
         unit_word = "" if unit.lower() == "count" else unit
-        return f"**{whole}** {unit_word} {name}".replace("  ", " ").strip()
+        return (f"**{whole}** {unit_word} {name or '(unknown)'}"
+                .replace("  ", " ").strip())
 
     # Snap to a kitchen-friendly increment, floored so a real ingredient never
     # rounds away to zero (e.g. 0.2 tsp → ¼ tsp, not nothing).
     step = _round_step(unit)
     snapped = max(step, _round_to(scaled_amount, step))
     amount_str = fmt_amount(snapped)
-    return f"**{amount_str}** {unit} {name}".replace("  ", " ")
+    return f"**{amount_str}** {unit} {name or '(unknown)'}".replace("  ", " ")
 
 
 # ---------------------------------------------------------------------------

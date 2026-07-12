@@ -317,6 +317,10 @@ def collect_optional_addons(
             seen.add(canon)
             display = (ing.get("original_text") or name or canon).strip()
             display = display.lstrip("•-*▢□● ").strip()  # drop leaked list bullets
+            # original_text can be a name-less fragment ("wedges, for serving")
+            # — re-attach the food name so the checkbox says what the item is.
+            if name and name.lower() not in display.lower():
+                display = f"{name} — {display}"
             addons.append({
                 "name":     name or canon,
                 "display":  display,
