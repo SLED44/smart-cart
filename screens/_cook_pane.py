@@ -349,8 +349,18 @@ _TEMPLATE = """\
     applyHighlight();
     save(all);
     if (scroll && st.active) {{
+      // Scroll ONLY the steps column. scrollIntoView() walks every scrollable
+      // ancestor — including the Streamlit page around this iframe — so the
+      // whole pane (both columns) visibly jumped whenever a step was tapped.
       var t = steps[st.active - 1];
-      if (t) t.scrollIntoView({{ behavior: "smooth", block: "center" }});
+      var sc = document.getElementById("stepscroll");
+      if (t && sc) {{
+        var delta = t.getBoundingClientRect().top - sc.getBoundingClientRect().top;
+        var top = sc.scrollTop + delta - (sc.clientHeight - t.offsetHeight) / 2;
+        // Instant, not smooth: some engines silently drop smooth programmatic
+        // scrolls inside embedded iframes, leaving the column stuck.
+        sc.scrollTop = Math.max(0, top);
+      }}
     }}
   }}
 
