@@ -57,10 +57,12 @@ The visual layer was built from a Claude Design hand-off (May 2026). Architectur
 
 **Critical rendering rules** (learned the hard way):
 1. **Use `st.html()`, not `st.markdown()`** for any HTML primitive. `st.markdown` runs the content through a markdown parser that mangles `*` characters in CSS comments and inserts unexpected tags.
-2. **Escape `</style>` in the CSS file content** before injecting. The HTML parser closes `<style>` at the first literal `</style>` it sees — even inside a CSS `/* */` comment. `main.py` does this with `.replace("</style>", "<\\/style>")`.
-3. **Don't rely on `:root` CSS variables in helpers.** Streamlit's DOM tree breaks variable inheritance somewhere. The `sc_design.py` helpers currently use **literal `oklch()` and hex colors inline** — DRY'd through the `PALETTE` dict at the top of the file. Color tweaks happen there.
+2. **Never put a raw `<` in `style.css` — not even inside a comment.** `st.html` sanitizes with DOMPurify, whose `SAFE_FOR_XML` rule (on by default) force-removes any element whose text contains `<` followed by `/`, `!`, or a word character. One literal `<style>` in a comment silently deletes the **entire** stylesheet — no error, no partial styling. `main.py`'s `_css_safe()` defensively rewrites every `<` as the CSS escape `\3c `, which the CSS parser treats as identical.
+3. **`:root` CSS variables, `oklch()`, and `.sc-*` class rules all work fine.** Once the stylesheet actually lands, vars resolve normally throughout Streamlit's DOM.
 
-To add a new visual primitive: write the helper in `sc_design.py` using `PALETTE` colors inline, render with `st.html(my_helper(...))`. Use class names only if you've verified that specific selector works inside Streamlit's DOM.
+**History (corrected 2026-07-23).** From the May 2026 refresh until 2026-07-23, `style.css` never loaded at all: its banner comment contained a literal `<style>`, so DOMPurify dropped all 10KB. The UI only looked right because `sc_design.py` writes literal inline styles on every element. Two notes in this file blamed `:root` inheritance for that; both were wrong and have been rewritten. Bisected on Streamlit 1.54 with a scratch probe app: `< b` and `<--` survive; `<style>`, `<!--`, and `<3` do not. Size, `@media`, and `oklch()` were all ruled out — an 11KB filler stylesheet loads fine.
+
+To add a new visual primitive you can now use either approach: a `.sc-*` class in `style.css`, or inline `PALETTE` colors in an `sc_design.py` helper. Existing helpers are all inline-styled; see the DRY-the-colors backlog item.
 
 ### Rotating credentials
 - **Anthropic key**: console.anthropic.com → keys → revoke + replace → update `.env` + Streamlit secrets
@@ -90,7 +92,7 @@ Rough priority order. Pick from the top.
 1. **Matching screen progress UI** — currently a basic spinner. Mocks in the design hand-off show a step-by-step grid of `matching_row` rendering as items resolve. Requires threading callback in `product_matcher.match_items` so the UI can render mid-flight. Helpers `matching_row` and `progress_section` are already in `sc_design.py` waiting to be wired.
 2. **Preferences screen redesign** — Claude Design has richer mocks: per-row product cards, drag handles, qty steppers, search bar with inline edit. Current screen is functional but plain.
 3. **Staples screen redesign** — same situation, mocks exist for category grouping + drag-to-reorder.
-4. **Tablet/mobile pass** — `style.css` has a `@media (max-width: 760px)` block but Streamlit's container chrome (sidebar toggle, top bar) overlays it. Needs `st.set_page_config(layout="centered")` plus tighter padding overrides.
+4. **Tablet/mobile pass** — no responsive rules exist yet. (This item used to claim `style.css` had a `@media (max-width: 760px)` block that Streamlit's chrome overlaid; there is no such block — corrected 2026-07-23.) Needs an actual `@media` block in `style.css`, plus `st.set_page_config(layout="centered")` and tighter padding overrides.
 5. **Step pills in header bar** — the mockup shows a 6-step progress indicator (Paste → Trim → Match → Deals → Review → Done) across the top of every screen. Not implemented.
 
 ### Out-of-the-gate polish (still relevant)
@@ -98,7 +100,7 @@ Rough priority order. Pick from the top.
 2. **Tighter review-queue vertical rhythm** — too much whitespace between primary card and alt cards. Drop padding in product card / inline section margins.
 
 ### Design-system cleanup (DRY the colors)
-**Status**: shipped working but inefficient. Every `sc_design.py` helper repeats oklch literals inline because Streamlit's DOM doesn't inherit `:root` CSS vars (silent fallback → unstyled). Fix: scope the var definitions to a selector Streamlit's DOM does inherit from (`.stApp` or `[data-testid="stAppViewContainer"]`) in `style.css`, then replace the literal colors in `sc_design.py` with `var(--sc-*)` references and the `PALETTE` dict. Test thoroughly on the live app since this is the third time we've hit a Streamlit CSS quirk.
+**Status**: unblocked 2026-07-23 — not yet done. Every `sc_design.py` helper repeats oklch literals inline. The old premise for that ("Streamlit's DOM doesn't inherit `:root` CSS vars") was wrong; the real problem was that `style.css` never loaded. It loads now, and `var(--sc-*)` off `:root` resolves correctly — verified in the running app. So the fix is just: replace the literal colors in `sc_design.py` with `var(--sc-*)` references, keeping `PALETTE` as the fallback map. No `.stApp` scoping needed. Worth doing on a branch and eyeballing each screen, since ~40 rules went live at once when the stylesheet was fixed.
 
 ### Quick wins (≤30 min each)
 6. **Auto-detect expired Kroger refresh token on home screen** and surface the Connect Kroger banner proactively rather than mid-match.
@@ -135,11 +137,12 @@ Rough priority order. Pick from the top.
 - **`load_dotenv(override=True)`** is intentional — the user's shell exports `ANTHROPIC_API_KEY=` (empty) from Claude Desktop, which would otherwise silently shadow the `.env` value.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
 - **Supabase free-tier pausing can't be reliably prevented — so the keepalive self-heals instead.** Learned July 2026 in two stages: (1) read-only GET pings don't count as "sufficient activity"; (2) even a daily *verified write* didn't stop the 2026-07-08 pause — Supabase paused the project one minute after a successful write, because once their scanner flags a project the pause proceeds anyway. `.github/workflows/keepalive.yml` (v3) runs daily (09:23 UTC), upserts kv key `keepalive:last_ping` and verifies it via a per-run nonce; if the write fails because the project is paused, it **auto-restores** via the Supabase Management API, waits for `ACTIVE_HEALTHY`, and retries. It also re-enables itself via the GitHub API to reset GitHub's 60-day scheduled-workflow disable timer. GitHub only emails a failure when auto-restore itself fails — that's when a human needs https://supabase.com/dashboard/project/odwkznptayhobwjgegin. Unpausing is **free** within 90 days of a pause (never a paid unlock); past 90 days the project is unrecoverable (data export only). Required repo secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ACCESS_TOKEN` (personal access token for the restore path).
-- **Four Streamlit CSS gotchas** to remember:
-  - `st.markdown` mangles CSS (interprets `*` as emphasis). Use `st.html` for any raw HTML/CSS injection.
-  - The HTML parser closes `<style>` at the first literal `</style>` — even inside CSS comments. Escape with `.replace("</style>", "<\\/style>")` when loading CSS files.
-  - `:root` CSS variables don't propagate into Streamlit's component DOM. Use literal colors in inline styles until/unless you scope vars to `.stApp` (see Design-system cleanup in backlog).
-  - `st.html`'s sanitizer (DOMPurify, Streamlit 1.54) silently strips inline `<svg>` — SVG renders as blank space, no error. Build art from plain styled `<div>`s instead (see `sc_design.recipe_tile_html`). Inline SVG *does* work inside `st.components.v1.html` iframes (not sanitized) — that's where `sc_design.recipe_art` is still used (cook-pane).
+- **Streamlit CSS gotchas** to remember — all of them are the sanitizer, and all of them fail *silently*:
+  - **A raw `<` anywhere in a CSS payload kills the whole `<style>` element.** DOMPurify's `SAFE_FOR_XML` removes any element whose text has `<` followed by `/`, `!`, or a word char. A `<style>` inside a `/* comment */` is enough. This made `style.css` completely inert from May 2026 to 2026-07-23. `main.py`'s `_css_safe()` rewrites `<` → `\3c ` to immunize it. Size, `@media`, and `oklch()` are *not* problems — an 11KB filler sheet loads fine.
+  - `st.markdown` mangles CSS (interprets `*` as emphasis). Use `st.html` for any raw HTML/CSS injection. `st.markdown` also truncates at the first literal `</style>`, which `st.html` does not.
+  - `:root` CSS variables **do** propagate fine, as do `oklch()` colors and `.sc-*` class rules. Earlier notes here claimed otherwise; that was a misdiagnosis of the `<`-in-comment bug.
+  - `st.html`'s sanitizer silently strips inline `<svg>` — SVG renders as blank space, no error. Build art from plain styled `<div>`s instead (see `sc_design.recipe_tile_html`). Inline SVG *does* work inside `st.components.v1.html` iframes (not sanitized) — that's where `sc_design.recipe_art` is still used (cook-pane).
+  - Debugging tip: `st.html` sends style-only payloads to Streamlit's *event* container, not the main tree, so don't panic when the `<style>` isn't where you expect. To check whether a sheet actually landed, look for one of its selectors in `document.styleSheets` rather than for the tag.
 
 ## Useful one-liners
 
@@ -158,4 +161,4 @@ python3 kroger_auth.py --reauth
 ```
 
 ---
-*Last update: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
+*Last update: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
