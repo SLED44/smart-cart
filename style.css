@@ -1,23 +1,22 @@
 /* ================================================================
-   SmartCart production CSS — drop-in replacement for the inline
-   <style> block at the top of main.py.
+   SmartCart design-system CSS.
 
-   USAGE in main.py (after page_config, before screen functions):
+   Loaded once at startup by main.py via _css_safe() + st.html(). Do NOT
+   switch that to st.markdown — markdown mangles CSS (it reads "*" as
+   emphasis) and truncates at the first literal close-style tag.
 
-       with open("style.css") as f:
-           st.markdown(f"<style>{f.read()}</style>", unsafe_allow_html=True)
+   HARD RULE: never put a raw "less-than" character in this file, not even
+   inside a comment. st.html sanitises with DOMPurify, whose SAFE_FOR_XML
+   rule deletes the whole style element when its text holds a less-than
+   sign followed by a slash, a bang, or a word character. main.py's
+   _css_safe() escapes them defensively, but keeping them out of here
+   entirely is the safer habit. This is what made the whole file inert
+   from the May 2026 refresh until 2026-07-23.
 
-   Or, if you'd rather keep one file, inline the contents inside the
-   existing st.markdown call.
-
-   This replaces the original ~30-line Bootstrap-4-alert palette block
-   (.match-badge / .sale-banner / .oos-banner / .product-card /
-   .footer-bar) with the full SmartCart design-system palette plus the
-   new primitives (.sc-stat-card, .sc-savings-card, .sc-product-card,
-   etc.) that the redesigned screens use.
-
-   The Streamlit theme in .streamlit/config.toml sets the primary green
-   for native widgets (buttons, sliders). Everything else is here.
+   Palette plus the primitives the redesigned screens use (.sc-stat-card,
+   .sc-savings-card, .match-badge, ...). The Streamlit theme in
+   .streamlit/config.toml sets the primary green for native widgets
+   (buttons, sliders). Everything else is here.
    ================================================================ */
 
 :root {

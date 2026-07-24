@@ -45,14 +45,26 @@ st.set_page_config(
 # Design-system CSS — full palette + primitives loaded from style.css.
 # ---------------------------------------------------------------------------
 
+def _css_safe(css: str) -> str:
+    """Make CSS survive st.html's sanitizer.
+
+    st.html runs the payload through DOMPurify, which has SAFE_FOR_XML on by
+    default. That rule force-removes any element whose text contains a "<"
+    followed by "/", "!", or a word character — so a single literal "<style>"
+    or "<!--" anywhere in the file (a comment counts) silently deletes the
+    *entire* <style> element. No error, no partial styling: the whole
+    stylesheet just never reaches document.styleSheets.
+
+    Verified 2026-07-23 on Streamlit 1.54: "< b" and "<--" survive, "<style>",
+    "<!--" and "<3" do not. Rewriting every "<" as the CSS escape "\\3c "
+    is equivalent to the CSS parser and invisible to the sanitizer, so the
+    file stays safe no matter what a future edit puts in a comment.
+    """
+    return css.replace("<", "\\3c ")
+
+
 with open("style.css") as _css:
-    # The HTML parser closes <style> at the first literal </style> it sees,
-    # even inside a CSS /* */ comment. style.css's leading USAGE comment
-    # contains a literal </style>, which prematurely terminates the tag and
-    # dumps the rest of the file to the page as text. Escape it so the HTML
-    # parser doesn't see a close tag (CSS parser, inside a comment, ignores).
-    _css_text = _css.read().replace("</style>", "<\\/style>")
-    st.html(f"<style>{_css_text}</style>")
+    st.html(f"<style>{_css_safe(_css.read())}</style>")
 
 # ---------------------------------------------------------------------------
 # Session state initialisation
