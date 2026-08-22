@@ -1,9 +1,10 @@
 # SmartCart — Python Dependencies
 # Install with: pip3 install -r requirements.txt
 
-# Streamlit — the entire UI layer (>=1.37 for st.dialog, used by the
-# recipe-preview popup on the propose/swap screens)
-streamlit>=1.37.0
+# Streamlit — the entire UI layer.
+#   >=1.37 for st.dialog (recipe-preview popup on the propose/swap screens)
+#   >=1.42 for st.context.cookies (auth.py reads the persistent-login cookie)
+streamlit>=1.42.0
 
 # HTTP requests — Kroger, Anthropic, and Supabase REST calls
 requests>=2.31.0

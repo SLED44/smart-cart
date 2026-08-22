@@ -107,6 +107,7 @@ _init_state()
 # side effects see a fully-bootstrapped environment.
 # ---------------------------------------------------------------------------
 
+import auth  # noqa: E402
 import kroger_auth  # noqa: E402
 from supabase_kv import kv_delete, kv_get  # noqa: E402
 
@@ -133,7 +134,12 @@ from screens import (  # noqa: E402
     store_setup,
     summary,
 )
-from screens._shared import go, pending_oauth_key, render_tab_bar  # noqa: E402
+from screens._shared import (  # noqa: E402
+    DEFAULT_SCREEN,
+    go,
+    pending_oauth_key,
+    render_tab_bar,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +214,15 @@ SCREENS = {
 
 
 def main():
+    # Re-adopt a signed auth cookie from a previous visit, then flush any
+    # cookie write it (or a login / sign-out) queued. Both run before the
+    # OAuth handler so a Kroger round-trip lands back on a logged-in app.
+    if auth.restore_session() and st.session_state.screen == "login":
+        # A restored session starts on "login" (that's the fresh-session
+        # default), which routes nowhere. Land it where a fresh sign-in lands.
+        st.session_state.screen = DEFAULT_SCREEN
+    auth.sync_cookie()
+
     # Finish any in-flight Kroger OAuth round-trip before rendering anything.
     _handle_oauth_callback()
 

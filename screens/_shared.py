@@ -55,6 +55,11 @@ TAB_HOME = {
     TAB_MEALPLAN: "mealplan_home",
 }
 
+# Where a session lands when it has no screen of its own — a fresh sign-in, or
+# one restored from the auth cookie. The meal planner is the daily-use entry
+# point.
+DEFAULT_SCREEN = TAB_HOME[TAB_MEALPLAN]
+
 
 def current_tab() -> str:
     """Resolve the active tab from the current screen."""

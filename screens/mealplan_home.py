@@ -11,11 +11,19 @@ What it shows:
 
 import streamlit as st
 
+import auth
 from mealplan import library
 from mealplan.rules import load_rules
-from sc_design import stat_card, plan_hero
+from sc_design import (
+    hero_tile_art,
+    hero_tile_meta,
+    plan_hero_header,
+    plan_hero_note,
+    stat_card,
+)
 from supabase_kv import kv_delete, kv_get
 
+from screens import _recipe_view
 from screens._shared import go
 
 KEY_PENDING_LINEUP = "pending_lineup"
@@ -33,6 +41,12 @@ _SETTINGS_LINKS = (
 
 
 def render():
+    # The cook screen returns here when you opened a meal from this page, so
+    # its "Made it" / notes-saved flash has to land here too.
+    flash = st.session_state.pop("mealplan_cook_flash", None)
+    if flash:
+        st.success(flash)
+
     st.title("🍳 Meal Planner")
     st.caption("Build a weekly lineup that respects your rules, hand the grocery list "
                "to SmartCart, and capture what worked.")
@@ -127,38 +141,92 @@ def _render_plan_new_section(summary: dict, rules: dict):
         go("mealplan_propose")
 
 
-def _resolve_recipes(slots: list[dict], lib: dict) -> list[dict]:
-    """Resolve plan slots to recipe dicts for the hero tiles, indexing a
-    single library snapshot (avoids one KV round-trip per slot). Missing
-    recipes become a titled placeholder so the tile still renders."""
+def _resolve_recipes(slots: list[dict], lib: dict) -> list[tuple[str | None, dict | None]]:
+    """Resolve plan slots to (recipe_id, recipe) pairs for the hero tiles,
+    indexing a single library snapshot (avoids one KV round-trip per slot).
+    A recipe deleted since the plan was confirmed resolves to None — the tile
+    still renders, it just isn't openable."""
     out = []
     for slot in slots:
         rid = slot.get("recipe_id")
-        recipe = lib.get(rid) if rid else None
-        out.append(recipe if recipe else {"title": f"(missing {rid})"})
+        out.append((rid, lib.get(rid) if rid else None))
     return out
+
+
+# Four tiles per row keeps titles readable at 7 meals; a fixed column count
+# also stops a 2-meal week from stretching two tiles across the whole card.
+_TILES_PER_ROW = 4
+
+
+def _tile_label(title: str) -> str:
+    """Button labels don't wrap gracefully past a couple of lines."""
+    title = title.strip() or "(untitled)"
+    return title if len(title) <= 42 else title[:41].rstrip() + "…"
+
+
+def _render_meal_tiles(entries, *, key_prefix: str, on_open,
+                       help_text: str, blocked_help: str):
+    """Hero meal tiles, each one clickable.
+
+    The tiles used to be a single st.html grid, which looked like a row of
+    cards but swallowed every click — the only way into a meal was Open
+    plan → the meal. Now each tile is art + a title button + the meta line,
+    so a meal is one click from home.
+
+    A tile with no library recipe behind it (deleted since the plan was
+    confirmed, or an imported title with nothing attached yet) still renders,
+    with its button disabled — there is nowhere to open.
+    """
+    for start in range(0, len(entries), _TILES_PER_ROW):
+        cols = st.columns(_TILES_PER_ROW)
+        for offset, (rid, recipe) in enumerate(entries[start:start + _TILES_PER_ROW]):
+            i = start + offset
+            with cols[offset]:
+                st.html(hero_tile_art(recipe or {}))
+                openable = bool(recipe and recipe.get("id"))
+                label = _tile_label((recipe or {}).get("title") or f"(missing {rid})")
+                if st.button(
+                    label,
+                    key=f"mph_tile_{key_prefix}_{i}",
+                    use_container_width=True,
+                    disabled=not openable,
+                    help=help_text if openable else blocked_help,
+                ):
+                    on_open(rid, recipe)
+                st.html(hero_tile_meta(recipe))
 
 
 def _render_pending_section(pending: dict, rules: dict):
     meals = pending.get("meals") or []
     titles = pending.get("titles") or []
     if meals:
-        recipes = _resolve_recipes(meals, library.get_all())
+        entries = _resolve_recipes(meals, library.get_all())
         touched = pending.get("updated_at", "")
         meta_right = (f"{len(meals)} slot(s) · {touched[:10]}"
                       if touched else f"{len(meals)} slot(s)")
     else:
-        recipes = [{"title": t} for t in titles]
+        # Imported titles have no library entry yet — nothing to open.
+        entries = [(None, {"title": t}) for t in titles]
         meta_right = "imported titles"
 
-    st.html(plan_hero(
-        tone="amber",
-        heading="Plan in progress",
-        pill_text="In progress",
-        meta_right=meta_right,
-        recipes=recipes,
-        empty_note="No slots yet — resume to start filling them.",
-    ))
+    with st.container(border=True):
+        st.html(plan_hero_header(
+            tone="amber",
+            heading="Plan in progress",
+            pill_text="In progress",
+            meta_right=meta_right,
+        ))
+        if entries:
+            # Nothing is confirmed yet, so a tile previews the recipe rather
+            # than dropping you into cooking mode.
+            _render_meal_tiles(
+                entries, key_prefix="pending",
+                on_open=lambda rid, recipe: _preview_meal(recipe, rules),
+                help_text="Preview this recipe",
+                blocked_help="Not in your library yet — resume planning to fill this slot",
+            )
+        else:
+            st.html(plan_hero_note("No slots yet — resume to start filling them."))
 
     col_resume, col_discard = st.columns([2, 1])
     with col_resume:
@@ -173,16 +241,22 @@ def _render_pending_section(pending: dict, rules: dict):
 
 def _render_current_plan_section(current: dict):
     meals = current.get("meals") or []
-    recipes = _resolve_recipes(meals, library.get_all())
+    entries = _resolve_recipes(meals, library.get_all())
     confirmed = current.get("confirmed_at", "")
-    st.html(plan_hero(
-        tone="green",
-        heading="This week's plan",
-        pill_text="Confirmed",
-        meta_right=f"Week #{current.get('week_number','?')}"
-                   + (f" · {confirmed[:10]}" if confirmed else ""),
-        recipes=recipes,
-    ))
+    with st.container(border=True):
+        st.html(plan_hero_header(
+            tone="green",
+            heading="This week's plan",
+            pill_text="Confirmed",
+            meta_right=f"Week #{current.get('week_number','?')}"
+                       + (f" · {confirmed[:10]}" if confirmed else ""),
+        ))
+        _render_meal_tiles(
+            entries, key_prefix="current",
+            on_open=_open_meal,
+            help_text="Open this meal in cooking mode",
+            blocked_help="This recipe was deleted from the library",
+        )
 
     # Size the next week up front, so you don't generate 5 when you need 2.
     col_n, col_sc = st.columns([1, 2])
@@ -212,19 +286,39 @@ def _render_current_plan_section(current: dict):
             go("mealplan_propose")
 
 
+def _open_meal(rid: str, recipe: dict):
+    """Straight from the home screen into cooking mode for one meal."""
+    st.session_state.mealplan_cook_recipe_id = rid
+    # So the cook screen's back button returns where you came from.
+    st.session_state.mealplan_cook_return = "mealplan_home"
+    go("mealplan_cook")
+
+
+def _preview_meal(recipe: dict, rules: dict):
+    """Modal recipe preview — used for not-yet-confirmed (pending) tiles."""
+    _recipe_view.open_preview(recipe, _recipe_view.compute_scale(recipe, rules))
+
+
 def _render_settings_expander(summary: dict):
     import main  # router owns the registry
     available = [(sid, label) for sid, label in _SETTINGS_LINKS
                  if sid in main.SCREENS]
-    if not available:
-        return
     with st.expander("⚙ Settings + admin"):
         st.caption(
             "Configure rules, grow the library, paste a recipe Claude.ai normalised "
             "for you, or import your existing rules-doc state."
         )
-        cols = st.columns(min(3, len(available)))
-        for i, (sid, label) in enumerate(available):
-            with cols[i % len(cols)]:
-                if st.button(label, key=f"mph_set_{sid}", use_container_width=True):
-                    go(sid)
+        if available:
+            cols = st.columns(min(3, len(available)))
+            for i, (sid, label) in enumerate(available):
+                with cols[i % len(cols)]:
+                    if st.button(label, key=f"mph_set_{sid}", use_container_width=True):
+                        go(sid)
+
+        # Login now persists across reloads via a cookie, so there has to be
+        # a way to end it — on a shared or borrowed device especially.
+        st.divider()
+        st.caption("Signed in on this device. Sign out to clear it.")
+        if st.button("🚪 Sign out", key="mph_sign_out"):
+            auth.end_session()
+            go("login")
