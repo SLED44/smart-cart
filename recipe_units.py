@@ -11,6 +11,7 @@ grocery list says "1.33 cans"). Keeping the tables + rounding here — with no
 Streamlit import — lets grocery.py reuse them without pulling in the UI stack.
 
 Public surface:
+    format_minutes(minutes, short)      total time as "8 hr 20 min" / "8h 20m"
     _DISCRETE_UNITS                     set of whole-purchase units
     _round_step(unit)   -> float        display granularity for a unit
     _round_to(value, step) -> float     half-up rounding to a step
@@ -89,6 +90,33 @@ def _is_whole_item(name: str, unit: str) -> bool:
     if unit.lower() not in ("", "count"):
         return False
     return bool(_WHOLE_RE.search(name or ""))
+
+
+def format_minutes(minutes, short: bool = False) -> str:
+    """Render a total time the way a cook reads a clock, not a stopwatch.
+
+    Slow-cooker recipes carry real values like 500 (8h20m of mostly unattended
+    time), and "500 min" / "500m" reads as broken. Hours are split out once the
+    total passes an hour.
+
+        45   -> "45 min"      / "45m"
+        75   -> "1 hr 15 min" / "1h 15m"
+        480  -> "8 hr"        / "8h"
+        500  -> "8 hr 20 min" / "8h 20m"
+    """
+    try:
+        total = int(round(float(minutes)))
+    except (TypeError, ValueError):
+        return ""
+    if total <= 0:
+        return ""
+    hours, mins = divmod(total, 60)
+    h_unit, m_unit, sep = ("h", "m", " ") if short else (" hr", " min", " ")
+    if not hours:
+        return f"{mins}{m_unit}"
+    if not mins:
+        return f"{hours}{h_unit}"
+    return f"{hours}{h_unit}{sep}{mins}{m_unit}"
 
 
 def round_quantity(amount: float, unit: str, name: str = "") -> float:

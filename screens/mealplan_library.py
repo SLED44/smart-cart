@@ -15,6 +15,7 @@ from mealplan.event_log import EVT_RECIPE_NEVER_AGAIN, log_event
 from mealplan.rules import _VALID_PROTEINS, load_rules, save_rules
 
 from screens._shared import go
+from recipe_units import format_minutes
 
 DEFAULT_FAV_CADENCE = [4, 6]
 _CARDS_PER_ROW = 3
@@ -117,7 +118,7 @@ def _render_card(recipe: dict, rules: dict):
         if recipe.get("proteins"):
             bits.append("· " + "/".join(recipe["proteins"]))
         if recipe.get("ready_in_minutes"):
-            bits.append(f"· {recipe['ready_in_minutes']} min")
+            bits.append(f"· {format_minutes(recipe['ready_in_minutes'])}")
         if bits:
             st.caption(" ".join(bits))
         meta_bits = []

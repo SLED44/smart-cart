@@ -19,6 +19,7 @@ from mealplan.event_log import EVT_BOOTSTRAP_COMPLETED, log_event
 from mealplan.rules import default_rules, load_rules
 
 from screens._shared import go
+from recipe_units import format_minutes
 
 _STAGE_KEY = "mealplan_bootstrap_stage"
 _CONFIG_KEY = "mealplan_bootstrap_config"
@@ -208,7 +209,8 @@ def _render_favorites_pick():
             if opt == "skip":
                 return "↪ Skip this favorite"
             r = fc.candidates[opt]
-            return f"{r.get('title','(untitled)')} · {r.get('ready_in_minutes','?')} min"
+            mins = format_minutes(r.get("ready_in_minutes")) or "? min"
+            return f"{r.get('title','(untitled)')} · {mins}"
 
         current = picks.get(fc.slug, 0)
         if current not in options:

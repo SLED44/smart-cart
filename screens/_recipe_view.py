@@ -73,7 +73,7 @@ def fmt_amount(q: float) -> str:
 # (one source of truth — the shopping list can't disagree with the cook screen).
 from recipe_units import (  # noqa: E402
     _DISCRETE_UNITS, _WHOLE_ITEMS, _WHOLE_RE, _is_whole_item,
-    _round_step, _round_to,
+    _round_step, _round_to, format_minutes,
 )
 
 # A row is a can/jar sold whole when the text names a can or carries a package
@@ -215,7 +215,7 @@ def render_recipe_detail(recipe: dict, scale: float = 1.0):
         if recipe.get("proteins"):
             meta_bits.append("· " + "/".join(recipe["proteins"]))
         if recipe.get("ready_in_minutes"):
-            meta_bits.append(f"· {recipe['ready_in_minutes']} min")
+            meta_bits.append(f"· {format_minutes(recipe['ready_in_minutes'])}")
         if recipe.get("servings_original"):
             meta_bits.append(f"· serves {recipe['servings_original']}")
         if recipe.get("rating"):

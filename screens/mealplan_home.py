@@ -15,8 +15,7 @@ import auth
 from mealplan import library
 from mealplan.rules import load_rules
 from sc_design import (
-    hero_tile_art,
-    hero_tile_meta,
+    hero_tile_card,
     plan_hero_header,
     plan_hero_note,
     stat_card,
@@ -166,34 +165,42 @@ def _tile_label(title: str) -> str:
 
 def _render_meal_tiles(entries, *, key_prefix: str, on_open,
                        help_text: str, blocked_help: str):
-    """Hero meal tiles, each one clickable.
+    """Hero meal tiles — art, title and meta, each whole tile one click target.
 
-    The tiles used to be a single st.html grid, which looked like a row of
-    cards but swallowed every click — the only way into a meal was Open
-    plan → the meal. Now each tile is art + a title button + the meta line,
-    so a meal is one click from home.
+    The tiles started as a single st.html grid, which looked like a row of
+    cards but swallowed every click. Streamlit can't put markup inside a
+    button, so each tile is a keyed container holding the card markup plus a
+    button; style.css stretches that button across the container as an
+    invisible hit layer (`.st-key-mph_card_on_*`) and the container draws the
+    card's border and hover state. Clicking anywhere on the card opens it.
+
+    If that CSS ever fails to load, the button simply renders under the card
+    with the recipe's title on it — still a working way in, just uglier.
 
     A tile with no library recipe behind it (deleted since the plan was
     confirmed, or an imported title with nothing attached yet) still renders,
-    with its button disabled — there is nowhere to open.
+    keyed `..._off_...` so it gets neither the hit layer nor the hover state.
     """
     for start in range(0, len(entries), _TILES_PER_ROW):
         cols = st.columns(_TILES_PER_ROW)
         for offset, (rid, recipe) in enumerate(entries[start:start + _TILES_PER_ROW]):
             i = start + offset
+            openable = bool(recipe and recipe.get("id"))
+            state = "on" if openable else "off"
             with cols[offset]:
-                st.html(hero_tile_art(recipe or {}))
-                openable = bool(recipe and recipe.get("id"))
-                label = _tile_label((recipe or {}).get("title") or f"(missing {rid})")
-                if st.button(
-                    label,
-                    key=f"mph_tile_{key_prefix}_{i}",
-                    use_container_width=True,
-                    disabled=not openable,
-                    help=help_text if openable else blocked_help,
-                ):
-                    on_open(rid, recipe)
-                st.html(hero_tile_meta(recipe))
+                with st.container(key=f"mph_card_{state}_{key_prefix}_{i}"):
+                    st.html(hero_tile_card(recipe or {},
+                                           fallback_title=f"(missing {rid})"))
+                    # No help= tooltip: it wraps the button in extra spans
+                    # that stop the hit layer from filling the card. The
+                    # label doubles as the accessible name.
+                    if st.button(
+                        _tile_label((recipe or {}).get("title") or f"(missing {rid})"),
+                        key=f"mph_tile_{key_prefix}_{i}",
+                        use_container_width=True,
+                        disabled=not openable,
+                    ):
+                        on_open(rid, recipe)
 
 
 def _render_pending_section(pending: dict, rules: dict):
