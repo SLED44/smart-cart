@@ -4,7 +4,8 @@ import os
 
 import streamlit as st
 
-from screens._shared import go
+import auth
+from screens._shared import DEFAULT_SCREEN, go
 
 
 def render():
@@ -23,8 +24,10 @@ def render():
                 if not app_password:
                     st.error("APP_PASSWORD is not set in your .env file / Streamlit secrets.")
                 elif password == app_password:
-                    st.session_state.authenticated = True
+                    # Signs in *and* drops the signed cookie, so a refresh or
+                    # an OAuth round-trip doesn't ask again.
+                    auth.start_session()
                     # Land on the meal planner — it's the daily-use entry point.
-                    go("mealplan_home")
+                    go(DEFAULT_SCREEN)
                 else:
                     st.error("Incorrect password.")

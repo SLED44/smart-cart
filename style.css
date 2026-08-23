@@ -214,6 +214,40 @@
 .sc-match-row.is-done   .sc-match-brand { color: var(--sc-preferred-fg); }
 .sc-match-row.is-flight .sc-match-brand { font-style: italic; }
 
+/* === PLAN-HERO MEAL TILES ========================================== */
+/* The home hero's meal tiles are Streamlit buttons (each meal opens from
+   the home screen), so they get styled back down to look like the tile
+   titles they replaced: no chrome until you hover. Streamlit stamps a
+   st-key-<key> class on every keyed widget; these are keyed mph_tile_*.
+   If a Streamlit build ever drops that class the buttons still work — they
+   just look like ordinary buttons. */
+
+[class*="st-key-mph_tile_"] button {
+  border: 1px solid transparent;
+  background: transparent;
+  padding: 4px 6px;
+  min-height: 0;
+  line-height: 1.25;
+  font-size: 13px;
+  font-weight: 600;
+  color: inherit;
+}
+[class*="st-key-mph_tile_"] button p {
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+[class*="st-key-mph_tile_"] button:hover:not(:disabled) {
+  border-color: var(--sc-green-200);
+  background: var(--sc-green-50);
+  color: var(--sc-green-900);
+}
+[class*="st-key-mph_tile_"] button:disabled {
+  border-color: transparent;
+  background: transparent;
+  color: var(--sc-fg-muted);
+}
+
 /* === FOOTER BAR (kept from source) ================================= */
 
 .footer-bar {

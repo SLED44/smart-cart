@@ -1,8 +1,12 @@
 """
 Cooking-mode screen — single-recipe read-only view with feedback buttons.
 
-Entry: ``st.session_state.mealplan_cook_recipe_id`` is set by the active
-screen's Open button (or the library browser).
+Entry: ``st.session_state.mealplan_cook_recipe_id`` is set by whoever sent us
+here — the active plan's Open button, a meal tile on the meal-planner home,
+or the library browser. That caller can set
+``st.session_state.mealplan_cook_return`` to name the screen the back button
+(and the post-feedback navigation) should return to; it defaults to the
+active plan.
 
 Feedback per PRD §11.2:
     Made it      — times_cooked += 1, last_cooked_at = now()
@@ -38,6 +42,7 @@ from screens import _recipe_view
 from screens._cook_pane import build_cook_pane, PANE_HEIGHT
 
 _RECIPE_KEY = "mealplan_cook_recipe_id"
+_RETURN_KEY = "mealplan_cook_return"
 _NOTES_EDIT_KEY = "mealplan_cook_notes_edit_open"
 _DELETE_CONFIRM_KEY = "mealplan_cook_never_again_confirm"
 _FLASH_KEY = "mealplan_cook_flash"
@@ -47,18 +52,18 @@ def render():
     rid = st.session_state.get(_RECIPE_KEY)
     if not rid:
         st.title("🍴 No recipe selected")
-        st.caption("Open one from your active plan or the library browser.")
-        if st.button("← Back to active plan", key="cook_back_none"):
-            go("mealplan_active")
+        st.caption("Open one from the meal-planner home, your active plan, "
+                   "or the library browser.")
+        if st.button(_back_label(), key="cook_back_none"):
+            _go_back()
         return
 
     recipe = library.get(rid)
     if not recipe:
         st.title("🍴 Recipe not found")
         st.caption(f"`{rid}` no longer exists in the library.")
-        if st.button("← Back to active plan", key="cook_back_missing"):
-            _clear_session()
-            go("mealplan_active")
+        if st.button(_back_label(), key="cook_back_missing"):
+            _go_back()
         return
 
     rules = load_rules()
@@ -88,9 +93,8 @@ def render():
 def _render_top_bar():
     col_back, _ = st.columns([1, 5])
     with col_back:
-        if st.button("← Back to plan", key="cook_back_top"):
-            _clear_session()
-            go("mealplan_active")
+        if st.button(_back_label(), key="cook_back_top"):
+            _go_back()
 
 
 def _render_hero(recipe: dict, household_size: int, original_servings: int):
@@ -230,8 +234,7 @@ def _render_action_buttons(rid: str, recipe: dict, rules: dict):
                 "new_times_cooked":  int(recipe.get("times_cooked") or 0) + 1,
             })
             st.session_state[_FLASH_KEY] = "Logged — times cooked +1."
-            _clear_session()
-            go("mealplan_active")
+            _go_back()
     with col_changes:
         if st.button("✏ Made changes (edit notes)",
                      use_container_width=True, key="cook_changes"):
@@ -278,8 +281,7 @@ def _render_notes_editor(rid: str, recipe: dict):
                 "new_times_cooked":  int(recipe.get("times_cooked") or 0) + 1,
             })
             st.session_state[_FLASH_KEY] = "Notes saved; times cooked +1."
-            _clear_session()
-            go("mealplan_active")
+            _go_back()
 
 
 def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
@@ -310,16 +312,34 @@ def _render_never_again_confirm(rid: str, recipe: dict, rules: dict):
             st.session_state[_FLASH_KEY] = (
                 f"Excluded {recipe.get('title','recipe')} from future planning."
             )
-            _clear_session()
-            go("mealplan_active")
+            _go_back()
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _return_screen() -> str:
+    """Where the back button (and post-feedback navigation) goes: whichever
+    screen opened this recipe, falling back to the active plan."""
+    return st.session_state.get(_RETURN_KEY) or "mealplan_active"
+
+
+def _back_label() -> str:
+    return ("← Back to meal planner" if _return_screen() == "mealplan_home"
+            else "← Back to plan")
+
+
+def _go_back():
+    """Leave cooking mode for whichever screen sent us here. Reads the return
+    screen before _clear_session() drops it."""
+    dest = _return_screen()
+    _clear_session()
+    go(dest)
+
+
 def _clear_session():
     """Reset the cook-screen ephemeral state. Recipe id stays — it's set
-    by whoever navigated us here (active screen, library)."""
-    for k in (_RECIPE_KEY, _NOTES_EDIT_KEY, _DELETE_CONFIRM_KEY):
+    by whoever navigated us here (active screen, home, library)."""
+    for k in (_RECIPE_KEY, _NOTES_EDIT_KEY, _DELETE_CONFIRM_KEY, _RETURN_KEY):
         st.session_state.pop(k, None)

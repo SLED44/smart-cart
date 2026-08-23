@@ -697,7 +697,7 @@ New Streamlit screens (each becomes a file in `screens/`):
 
 | Screen | Module | Role |
 |---|---|---|
-| `mealplan_home` | `screens/mealplan_home.py` | Entry card on existing SmartCart home; "Plan meals" button + N input |
+| `mealplan_home` | `screens/mealplan_home.py` | The meal-plan tab's landing page (diverged from §13.4 — it is its own home, not a card on the grocery home): plan hero with tappable meal tiles, "Plan meals" + N input, stats strip, settings expander |
 | `mealplan_propose` | `screens/mealplan_propose.py` | Proposed lineup with per-meal Keep/Replace + "Give me 5 new options" + "Why these picks?" expander |
 | `mealplan_swap` | `screens/mealplan_swap.py` | Per-slot candidate picker: cuisine/protein filters + name search + 5 candidate cards |
 | `mealplan_active` | `screens/mealplan_active.py` | The confirmed week — list of N meals, tappable to open cooking view |
@@ -839,10 +839,16 @@ No schema changes. New `kv` keys (listed in §7). All access flows through `meal
 
 ### 19.5 Streamlit CSS gotchas reminder
 
-Per CLAUDE.md, three traps to avoid when writing new screens:
+Per CLAUDE.md, the traps to avoid when writing new screens (items 2-3 corrected
+2026-07-23 — the original advice here was based on a misdiagnosis):
 1. Use `st.html()` not `st.markdown()` for raw HTML/CSS
-2. Escape `</style>` in CSS file content with `.replace("</style>", "<\\/style>")`
-3. `:root` CSS vars don't propagate; use inline literal colors (or var() under a `.stApp` scope if that's been fixed)
+2. Never put a raw `<` anywhere in a CSS payload — not even inside a comment.
+   DOMPurify's `SAFE_FOR_XML` drops the whole `<style>` element, silently.
+   `main.py`'s `_css_safe()` rewrites every `<` as the CSS escape `\3c `.
+3. `:root` CSS vars **do** propagate, as do `oklch()` colors and `.sc-*` class
+   rules. Inline literal colors are a style choice, not a requirement.
+4. `st.html`'s sanitizer strips inline `<svg>` — build art from styled `<div>`s,
+   or use `st.components.v1.html` / `st.iframe` (not sanitized).
 
 ---
 

@@ -115,8 +115,11 @@ def reason_chips(reasons: list[tuple[str, str]] | list[str]) -> str:
 # ---------------------------------------------------------------------------
 # Plan hero — the home-screen focal card. A confirmed (green) or in-progress
 # (amber) plan shown as a header (heading + status pill + week/date) above a
-# row of meal tiles (RecipeArt/photo + title + meta). The action buttons
-# (Open / Plan-new, Resume / Discard) render as Streamlit widgets below it.
+# row of meal tiles (RecipeArt/photo + title + meta). Header and tile pieces
+# are separate helpers because the tiles are interleaved with Streamlit
+# buttons (each meal opens from the home screen); the whole thing goes inside
+# one st.container(border=True). The plan-level actions (Open / Plan-new,
+# Resume / Discard) render as Streamlit widgets below it.
 # ---------------------------------------------------------------------------
 
 def _hero_meta(recipe: dict) -> str:
@@ -130,27 +133,29 @@ def _hero_meta(recipe: dict) -> str:
     return " · ".join(bits)
 
 
-def _hero_tile(recipe: dict) -> str:
-    """One hero meal tile: centered art/photo + title + meta."""
+def hero_tile_art(recipe: dict, size: int = 60) -> str:
+    """Centered art/photo for one hero meal tile."""
+    art = recipe_tile_html(recipe or {}, size=size)
+    return f'<div style="display:flex; justify-content:center;">{art}</div>'
+
+
+def hero_tile_meta(recipe: dict) -> str:
+    """The 'Japanese · 35m' line that sits under a hero tile's title."""
     import html as _html
-    title = _html.escape(recipe.get("title", "(untitled)")) if recipe else "(empty slot)"
     meta = _html.escape(_hero_meta(recipe)) if recipe else "—"
-    art = recipe_tile_html(recipe or {}, size=60)
-    return (
-        f'<div style="min-width:0; text-align:center;">'
-        f'<div style="display:flex; justify-content:center;">{art}</div>'
-        f'<div style="font-size:13px; font-weight:600; color:{P["fg"]}; '
-        f'margin-top:6px; line-height:1.25; overflow:hidden; '
-        f'text-overflow:ellipsis;">{title}</div>'
-        f'<div style="font-size:11.5px; color:{P["fg_muted"]};">{meta}</div></div>'
-    )
+    return (f'<div style="font-size:11.5px; color:{P["fg_muted"]}; '
+            f'text-align:center; line-height:1.3; margin-top:-6px;">{meta}</div>')
 
 
-def plan_hero(*, tone: Literal["green", "amber"], heading: str, pill_text: str,
-              meta_right: str = "", recipes: list[dict],
-              empty_note: str = "") -> str:
-    """The home-screen hero plan card. Render with st.html(); place the action
-    buttons in a Streamlit column row directly below."""
+def plan_hero_header(*, tone: Literal["green", "amber"], heading: str,
+                     pill_text: str, meta_right: str = "") -> str:
+    """Heading + status pill + week/date line for the home-screen plan hero.
+
+    Header only: the meal tiles below it are Streamlit widgets (an art block,
+    a title button and a meta line per tile) so each one is clickable, which
+    an st.html grid can never be. Render this inside a
+    ``st.container(border=True)`` — that container is the hero's card.
+    """
     import html as _html
     pill_bg, pill_bd, pill_fg = {
         "green": ("oklch(97% 0.03 150)", "oklch(87% 0.11 150)", P["green_900"]),
@@ -163,22 +168,19 @@ def plan_hero(*, tone: Literal["green", "amber"], heading: str, pill_text: str,
     )
     right = (f'<span style="font-size:13px; color:{P["fg_muted"]};">'
              f'{_html.escape(meta_right)}</span>') if meta_right else ""
-    if recipes:
-        tiles = "".join(_hero_tile(r) for r in recipes)
-        body = (f'<div style="display:grid; '
-                f'grid-template-columns:repeat(auto-fit, minmax(92px,1fr)); '
-                f'gap:10px; margin-top:14px;">{tiles}</div>')
-    else:
-        body = (f'<div style="font-size:13.5px; color:{P["fg_muted"]}; '
-                f'margin-top:10px;">{_html.escape(empty_note)}</div>')
     return (
-        f'<div style="background:{P["surface"]}; border:1px solid {P["border"]}; '
-        f'border-radius:14px; padding:18px 20px; margin-bottom:8px;">'
         f'<div style="display:flex; align-items:center; justify-content:space-between; '
-        f'gap:10px;"><div style="display:flex; align-items:center; gap:10px;">'
-        f'<span style="font-size:16px; font-weight:700; color:{P["fg"]};">'
-        f'{_html.escape(heading)}</span>{pill}</div>{right}</div>{body}</div>'
+        f'gap:10px; margin-bottom:6px;"><div style="display:flex; align-items:center; '
+        f'gap:10px;"><span style="font-size:16px; font-weight:700; color:{P["fg"]};">'
+        f'{_html.escape(heading)}</span>{pill}</div>{right}</div>'
     )
+
+
+def plan_hero_note(text: str) -> str:
+    """Muted line shown in place of the tiles when a plan has no slots yet."""
+    import html as _html
+    return (f'<div style="font-size:13.5px; color:{P["fg_muted"]}; '
+            f'margin-top:6px;">{_html.escape(text)}</div>')
 
 
 # ---------------------------------------------------------------------------

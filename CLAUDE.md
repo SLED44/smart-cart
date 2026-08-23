@@ -8,7 +8,7 @@ Single-user Streamlit app that turns a freeform grocery list into a Kroger (City
 ## Stack
 | Layer | Tech | Notes |
 |---|---|---|
-| UI | Streamlit | 1500-line `main.py` is all screens + router |
+| UI | Streamlit | `main.py` is the ~250-line router; one module per screen under `screens/` |
 | AI | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | List parsing + best-match selection |
 | Grocery | Kroger Public API | OAuth 2.0 + PKCE for cart writes; client_credentials for location search |
 | Persistence | Supabase Postgres, single `kv (key text pk, value jsonb)` table | Project ref `odwkznptayhobwjgegin` in SLED44 org, us-west-1, free tier |
@@ -18,7 +18,8 @@ Single-user Streamlit app that turns a freeform grocery list into a Kroger (City
 ## Module map
 | File | Responsibility |
 |---|---|
-| `main.py` | Streamlit screens, navigation, OAuth callback handler, `st.secrets → os.environ` bridge |
+| `main.py` | Router: screen dispatch, session bootstrap, OAuth callback handler, `st.secrets → os.environ` bridge |
+| `auth.py` | Household login that survives a reload — signed cookie, no server-side session store. See Persistent login below. |
 | `supabase_kv.py` | `kv_get` / `kv_put` / `kv_delete` via PostgREST. All persistence flows through here. |
 | `preference_store.py` | Domain interface over KV: preferences, staples, session log, export/import |
 | `kroger_auth.py` | OAuth (hosted flow + local CLI fallback). Tokens persist in Supabase. `NeedsAuthorization` exception. |
@@ -63,6 +64,26 @@ The visual layer was built from a Claude Design hand-off (May 2026). Architectur
 **History (corrected 2026-07-23).** From the May 2026 refresh until 2026-07-23, `style.css` never loaded at all: its banner comment contained a literal `<style>`, so DOMPurify dropped all 10KB. The UI only looked right because `sc_design.py` writes literal inline styles on every element. Two notes in this file blamed `:root` inheritance for that; both were wrong and have been rewritten. Bisected on Streamlit 1.54 with a scratch probe app: `< b` and `<--` survive; `<style>`, `<!--`, and `<3` do not. Size, `@media`, and `oklch()` were all ruled out — an 11KB filler stylesheet loads fine.
 
 To add a new visual primitive you can now use either approach: a `.sc-*` class in `style.css`, or inline `PALETTE` colors in an `sc_design.py` helper. Existing helpers are all inline-styled; see the DRY-the-colors backlog item.
+
+### Persistent login
+`st.session_state` dies with the WebSocket, so the bare `authenticated` flag
+logged you out on every refresh, on the Kroger OAuth round-trip, and after each
+Streamlit Cloud idle-restart. `auth.py` backs it with a first-party cookie
+(`sc_auth`) holding `v1.<expires_at>.<hmac-sha256(APP_PASSWORD, ...)>` — no
+secret in the cookie, nothing stored server-side (a paused Supabase can't lock
+you out), and rotating `APP_PASSWORD` invalidates every outstanding token.
+
+- **Read** via `st.context.cookies` (hence `streamlit>=1.42` in requirements).
+- **Write** via a 1px `st.iframe` (falls back to `st.components.v1.html`) that
+  sets `document.cookie` on the parent — those iframes run same-origin, so the
+  cookie lands on the app's own origin. Writes are queued in `session_state`
+  first (`auth.start_session()` / `end_session()`) and flushed by
+  `auth.sync_cookie()` on the *next* run, because the `st.rerun()` that
+  navigation triggers would otherwise discard the element.
+- The cookie is consulted **once per Streamlit session**, so signing out isn't
+  undone by the stale value still sitting in this connection's headers.
+- Sign out lives in the meal planner's **⚙ Settings + admin** expander.
+- 30-day expiry, refreshed on any visit past the halfway mark.
 
 ### Rotating credentials
 - **Anthropic key**: console.anthropic.com → keys → revoke + replace → update `.env` + Streamlit secrets
@@ -117,7 +138,7 @@ Rough priority order. Pick from the top.
 15. **Brute-force protection on login** — current password check has no rate limit. 3 failed attempts → cooldown.
 
 ### Architecture cleanup (only worth doing if the app keeps growing)
-16. **Split `main.py`** into a `screens/` package — one file per screen, router stays in `main.py`. Currently 1500 lines.
+16. ✅ **Split `main.py`** into a `screens/` package — done; `main.py` is now just the router (~250 lines) and each screen is its own module.
 17. **Split `product_matcher.py`** (850 LOC) into `kroger_api.py` (HTTP layer), `claude_select.py` (LLM prompt + parsing), `matching.py` (orchestration).
 18. **Replace `print()` with `logging`** — would surface nicely in Streamlit Cloud's structured log view.
 19. **Tests** — there's only one self-test in `preference_store.py --test`. Worth pytest skeletons for `list_parser`, `product_matcher` (with mocked Kroger), `cart_manager` (with mocked Kroger).
@@ -150,6 +171,9 @@ Rough priority order. Pick from the top.
 # Smoke test everything
 python3 supabase_kv.py && python3 preference_store.py --test
 
+# Meal-planner suite (network-free; same thing CI runs) + auth token self-test
+python3 -m mealplan._tests && python3 auth.py --test
+
 # Pull a fresh local backup from Supabase
 python3 -c "import json, preference_store; print(json.dumps(preference_store.export_data(), indent=2))" > backup_$(date +%Y%m%d).json
 
@@ -161,4 +185,4 @@ python3 kroger_auth.py --reauth
 ```
 
 ---
-*Last update: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
+*Last update: 2026-08-22 — persistent login (`auth.py` signed cookie; sign-out in meal-planner settings) and clickable meal tiles on the meal-planner home (each meal opens straight into cooking mode). Previous: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
