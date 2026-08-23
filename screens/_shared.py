@@ -170,12 +170,13 @@ def split_auto_confirmed():
             # Weight-coverage math normally happens on the review screen,
             # which auto-confirmed items never reach. Apply it here so
             # "2 lbs ground beef" against a 1-lb preferred pack buys 2,
-            # not 1.
-            notes = item.get("notes", "")
+            # not 1. coverage_quantity() leaves counted items alone — an
+            # auto-confirmed "2 cans" must never be silently rewritten to 1
+            # (there's no review card here for anyone to notice it).
             primary = item.get("primary")
-            if notes and primary:
+            if primary:
                 import product_matcher
-                smart = product_matcher.suggested_quantity(notes, primary)
+                smart = product_matcher.coverage_quantity(item, primary)
                 if smart is not None:
                     item = {**item, "quantity": float(smart)}
             auto_confirmed.append(item)

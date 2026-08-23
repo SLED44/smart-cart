@@ -849,12 +849,96 @@ def suggested_quantity(item_notes: str, product: dict) -> int | None:
     return max(1, math.ceil(needed_oz / product_oz))
 
 
+def coverage_quantity(item: dict, product: dict) -> int | None:
+    """How many of `product` to buy to cover the weight in `item`'s notes —
+    or None when that math doesn't apply to this item.
+
+    `suggested_quantity` reads the notes as the *total* amount wanted, which
+    is only true for the shape the list parser gives butcher/deli items:
+    "2 lbs ground beef" -> quantity 1, unit "", notes "2 lbs".
+
+    When the list already states how many units to buy, that count wins. A
+    meal-plan line like "2 can cannellini beans (15 oz)" parses to quantity 2
+    with "15 oz" in the notes — but there the size describes ONE can, not the
+    total, so dividing by the product size collapsed 2 cans to
+    ceil(15 / 15.5) = 1. Same for "4 salmon portions ~6 oz each". Anything
+    the parser counted (quantity > 1) is therefore left alone.
+    """
+    try:
+        parsed_qty = float(item.get("quantity", 1) or 1)
+    except (TypeError, ValueError):
+        parsed_qty = 1.0
+    if parsed_qty > 1:
+        return None
+    notes = (item.get("notes") or "").strip()
+    if not notes or not product:
+        return None
+    return suggested_quantity(notes, product)
+
+
 # ---------------------------------------------------------------------------
 # CLI entry point — run directly to test matching
 # ---------------------------------------------------------------------------
 
+def _run_quantity_self_test() -> None:
+    """Offline checks for the quantity math — no network, no API key.
+
+    Run with:  python3 product_matcher.py --test
+    """
+    CAN_15_5 = {"product_name": "Kroger Cannellini Beans - 15.5oz can", "size": "15.5 oz"}
+    BEEF_12  = {"product_name": "Ground Beef 80/20", "size": "12 oz"}
+    SALMON_6 = {"product_name": "Atlantic Salmon Portion", "size": "6 oz"}
+    EGGS_12  = {"product_name": "Grade A Large Eggs", "size": "12 ct"}
+
+    # The regression: a meal-plan line "2 can cannellini beans (15 oz)" parses
+    # to quantity 2 with "15 oz" in the notes. That size is ONE can, so the
+    # coverage math used to buy ceil(15 / 15.5) = 1 can instead of 2 — and for
+    # an item with a saved preference it happened during auto-confirm, where
+    # there is no review card to catch it.
+    beans = {"item_name": "Cannellini Bean", "quantity": 2, "unit": "can", "notes": "15 oz"}
+    assert suggested_quantity(beans["notes"], CAN_15_5) == 1, "raw helper still divides"
+    assert coverage_quantity(beans, CAN_15_5) is None, "counted item must keep its count"
+    print("✓ '2 cans (15 oz)' keeps quantity 2")
+
+    # Portions counted by the list keep their count too.
+    salmon = {"item_name": "Salmon Portion", "quantity": 4, "unit": "count",
+              "notes": "~6 oz each"}
+    assert coverage_quantity(salmon, SALMON_6) is None
+    print("✓ '4 salmon portions ~6 oz each' keeps quantity 4")
+
+    # The case the math exists for: butcher weight, uncounted by the parser.
+    beef = {"item_name": "Ground Beef", "quantity": 1, "unit": "", "notes": "2 lbs"}
+    assert coverage_quantity(beef, BEEF_12) == 3, "2 lbs / 12 oz should buy 3"
+    print("✓ '2 lbs ground beef' against a 12 oz pack still buys 3")
+
+    # A single container still scales to cover the amount asked for.
+    tomatoes = {"item_name": "Canned Diced Tomatoes", "quantity": 1, "unit": "can",
+                "notes": "28 oz"}
+    assert coverage_quantity(tomatoes, {"size": "14.5 oz"}) == 2
+    print("✓ single '28 oz' can against a 14.5 oz product buys 2")
+
+    # No notes, no product, unparseable notes -> no adjustment.
+    assert coverage_quantity({"quantity": 1, "notes": ""}, BEEF_12) is None
+    assert coverage_quantity({"quantity": 1, "notes": "2 lbs"}, {}) is None
+    assert coverage_quantity({"quantity": 1, "notes": "drained"}, CAN_15_5) is None
+    print("✓ missing / unparseable inputs leave the quantity alone")
+
+    # Pack-size math is untouched by this change.
+    assert _adjust_quantity_for_pack_size(4, EGGS_12) == 1
+    assert _adjust_quantity_for_pack_size(24, EGGS_12) == 2
+    assert _adjust_quantity_for_pack_size(2, CAN_15_5) == 2
+    print("✓ pack-size adjustment unchanged (4 eggs -> 1 carton, 2 cans -> 2)")
+
+    print("\n✓ All tests passed.")
+
+
 if __name__ == "__main__":
     import sys
+
+    if "--test" in sys.argv:
+        _run_quantity_self_test()
+        sys.exit(0)
+
     from list_parser import parse_grocery_list
 
     TEST_LIST = "whole milk 1 gallon, large eggs 1 dozen, bananas, chicken breast 2 lbs, olive oil"
