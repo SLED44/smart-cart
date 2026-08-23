@@ -84,7 +84,7 @@ In the [Kroger Developer Portal](https://developer.kroger.com), edit your app an
 
 ### Step 5 — First-time setup
 
-1. Open the app URL, log in with `APP_PASSWORD`. You land on the Meal Planner home.
+1. Open the app URL, log in with `APP_PASSWORD`. You land on the Meal Planner home. The login sticks for 30 days on that browser — sign out from **Meal Planner → ⚙ Settings + admin** when you want to end it.
 2. Bootstrap the recipe library (Meal Planner → Library → bootstrap pull from Spoonacular; the free tier's daily quota covers it).
 3. Review the planner rules (Meal Planner → Rules) — household size, protein limits, cuisine variety, exclusions.
 4. Switch to the Grocery tab: **Connect Kroger** → authorize on Kroger → you land back in the app.
@@ -125,7 +125,7 @@ python3 kroger_auth.py --reauth
 
 ### Weekly meal plan → groceries (the main flow)
 
-1. Open the app URL, log in. You land on **Meal Planner home**.
+1. Open the app URL (you stay logged in between visits). You land on **Meal Planner home**, where each meal tile in the plan card opens that recipe.
 2. Click **Plan meals** and choose how many dinners you want (default 5).
 3. The planner proposes a lineup of recipe cards — title, cuisine, protein, prep+cook time, last-made date. An optional **"Why these picks?"** expander shows how the rules shaped the lineup.
 4. For each card, **Keep** it or **Replace** it. Replacing surfaces alternative candidates (filtered by cuisine/protein, or unfiltered). You can also regenerate the whole lineup.
@@ -220,6 +220,7 @@ Preferences page → **Backup & Restore** expander. Download a JSON snapshot any
 
 - The Supabase **service_role** key bypasses RLS. Treat it like a database password — paste it only into Streamlit Cloud's secrets manager or your local `.env`. Never commit it.
 - The household `APP_PASSWORD` is the only thing protecting the public Streamlit URL from anyone on the internet. Pick a strong one.
+- Logging in drops a signed `sc_auth` cookie (30 days) so a refresh doesn't ask again. It carries no secret — just an expiry and an HMAC keyed by `APP_PASSWORD` — and nothing is stored server-side. Changing `APP_PASSWORD` invalidates every outstanding cookie, so that's how you sign out a device you no longer have.
 - Kroger OAuth scope is `product.compact cart.basic:write` — no access to payment info or order history.
 - Set an Anthropic spending cap of $10/month at console.anthropic.com.
 

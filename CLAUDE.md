@@ -8,7 +8,7 @@ Single-user Streamlit app that turns a freeform grocery list into a Kroger (City
 ## Stack
 | Layer | Tech | Notes |
 |---|---|---|
-| UI | Streamlit | 1500-line `main.py` is all screens + router |
+| UI | Streamlit | `main.py` is the ~250-line router; one module per screen under `screens/` |
 | AI | Claude Haiku 4.5 (`claude-haiku-4-5-20251001`) | List parsing + best-match selection |
 | Grocery | Kroger Public API | OAuth 2.0 + PKCE for cart writes; client_credentials for location search |
 | Persistence | Supabase Postgres, single `kv (key text pk, value jsonb)` table | Project ref `odwkznptayhobwjgegin` in SLED44 org, us-west-1, free tier |
@@ -138,7 +138,7 @@ Rough priority order. Pick from the top.
 15. **Brute-force protection on login** — current password check has no rate limit. 3 failed attempts → cooldown.
 
 ### Architecture cleanup (only worth doing if the app keeps growing)
-16. **Split `main.py`** into a `screens/` package — one file per screen, router stays in `main.py`. Currently 1500 lines.
+16. ✅ **Split `main.py`** into a `screens/` package — done; `main.py` is now just the router (~250 lines) and each screen is its own module.
 17. **Split `product_matcher.py`** (850 LOC) into `kroger_api.py` (HTTP layer), `claude_select.py` (LLM prompt + parsing), `matching.py` (orchestration).
 18. **Replace `print()` with `logging`** — would surface nicely in Streamlit Cloud's structured log view.
 19. **Tests** — there's only one self-test in `preference_store.py --test`. Worth pytest skeletons for `list_parser`, `product_matcher` (with mocked Kroger), `cart_manager` (with mocked Kroger).
