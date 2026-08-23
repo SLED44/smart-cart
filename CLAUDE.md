@@ -135,6 +135,18 @@ Rough priority order. Pick from the top.
 - **Streamlit free tier kills containers on inactivity** — first request after a few hours takes ~10s cold start. Acceptable for weekly shopping.
 - **Service-role key bypasses RLS**. RLS is enabled as a safety net but no policies exist. If you add other clients (mobile app, browser extension), introduce anon-key + RLS policies before exposing it.
 - **`load_dotenv(override=True)`** is intentional — the user's shell exports `ANTHROPIC_API_KEY=` (empty) from Claude Desktop, which would otherwise silently shadow the `.env` value.
+- **Quantity from notes only applies to items the list didn't count.**
+  `product_matcher.suggested_quantity()` reads an item's notes as the *total*
+  amount wanted ("2 lbs" ÷ a 12 oz pack → 3), which is only true for the shape
+  the parser gives butcher/deli items (quantity 1, unit "", weight in notes).
+  Meal-plan lines like `2 can cannellini beans (15 oz)` parse to quantity 2
+  with "15 oz" in notes — there the size is ONE can, and dividing collapsed
+  2 cans to `ceil(15 / 15.5)` = 1. Worse, items with a saved preference are
+  auto-confirmed (`screens/_shared.split_auto_confirmed`), so it happened with
+  no review card to catch it. Every call site now goes through
+  `product_matcher.coverage_quantity(item, product)`, which returns None for
+  anything the parser counted (quantity > 1). Fixed 2026-08-23; regression
+  tests in `python3 product_matcher.py --test`.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
 - **Supabase free-tier pausing can't be reliably prevented — so the keepalive self-heals instead.** Learned July 2026 in two stages: (1) read-only GET pings don't count as "sufficient activity"; (2) even a daily *verified write* didn't stop the 2026-07-08 pause — Supabase paused the project one minute after a successful write, because once their scanner flags a project the pause proceeds anyway. `.github/workflows/keepalive.yml` (v3) runs daily (09:23 UTC), upserts kv key `keepalive:last_ping` and verifies it via a per-run nonce; if the write fails because the project is paused, it **auto-restores** via the Supabase Management API, waits for `ACTIVE_HEALTHY`, and retries. It also re-enables itself via the GitHub API to reset GitHub's 60-day scheduled-workflow disable timer. GitHub only emails a failure when auto-restore itself fails — that's when a human needs https://supabase.com/dashboard/project/odwkznptayhobwjgegin. Unpausing is **free** within 90 days of a pause (never a paid unlock); past 90 days the project is unrecoverable (data export only). Required repo secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ACCESS_TOKEN` (personal access token for the restore path).
 - **Streamlit CSS gotchas** to remember — all of them are the sanitizer, and all of them fail *silently*:

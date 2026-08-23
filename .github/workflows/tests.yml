@@ -25,3 +25,6 @@ jobs:
 
       - name: Run meal-planner tests
         run: python3 -m mealplan._tests
+
+      - name: Run quantity-math tests
+        run: python3 product_matcher.py --test

@@ -81,17 +81,19 @@ def render():
     qty_key = f"qty_{idx}"
     qty_suggested = f"qty_suggested_{idx}"
 
+    # coverage_quantity() only fires for items the list didn't already count
+    # ("2 lbs ground beef"); an explicit "2 cans" keeps its 2.
     if qty_key not in st.session_state:
         base_qty = float(item.get("quantity", 1))
-        if current and item_notes:
-            smart = product_matcher.suggested_quantity(item_notes, current)
+        if current:
+            smart = product_matcher.coverage_quantity(item, current)
             if smart is not None:
                 base_qty = float(smart)
                 st.session_state[qty_suggested] = True
         st.session_state[qty_key] = max(1.0, base_qty)
 
-    if current and item_notes and not st.session_state.get(f"qty_locked_{idx}"):
-        smart = product_matcher.suggested_quantity(item_notes, current)
+    if current and not st.session_state.get(f"qty_locked_{idx}"):
+        smart = product_matcher.coverage_quantity(item, current)
         if smart is not None and not st.session_state.get(f"qty_user_edited_{idx}"):
             st.session_state[qty_key] = max(1.0, float(smart))
 
@@ -109,8 +111,8 @@ def render():
             st.session_state[f"qty_user_edited_{idx}"] = True
         st.session_state[qty_key] = new_qty
     with col_hint:
-        if item_notes and current:
-            smart = product_matcher.suggested_quantity(item_notes, current)
+        if current:
+            smart = product_matcher.coverage_quantity(item, current)
             if smart is not None:
                 product_oz = product_matcher.parse_size_to_oz(current.get("size", ""))
                 if product_oz:
