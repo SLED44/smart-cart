@@ -887,6 +887,33 @@ def equipment_target_tests(t: _T):
         assert any("include_one_of_per_week" in e for e in validate_rules(bad))
 
 
+def time_format_tests(t: "_T") -> None:
+    """format_minutes — slow-cooker recipes carry real 400-500 minute totals,
+    and "500 min" reads as broken to a cook."""
+    from recipe_units import format_minutes
+
+    @t.case("under an hour stays in minutes")
+    def _():
+        assert format_minutes(45) == "45 min"
+        assert format_minutes(45, short=True) == "45m"
+
+    @t.case("an exact hour drops the minutes")
+    def _():
+        assert format_minutes(60) == "1 hr"
+        assert format_minutes(480, short=True) == "8h"
+
+    @t.case("a slow-cooker total reads as hours + minutes, never '500 min'")
+    def _():
+        assert format_minutes(500) == "8 hr 20 min"
+        assert format_minutes(500, short=True) == "8h 20m"
+        assert format_minutes(75) == "1 hr 15 min"
+
+    @t.case("missing / zero / junk times render as nothing, not '0 min'")
+    def _():
+        for bad in (0, None, "", "soon", -5):
+            assert format_minutes(bad) == "", f"{bad!r} -> {format_minutes(bad)!r}"
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
@@ -895,6 +922,7 @@ def main() -> int:
     grocery_addon_tests(t)
     swap_tests(t)
     equipment_target_tests(t)
+    time_format_tests(t)
     return t.summary()
 
 

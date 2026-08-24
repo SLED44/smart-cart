@@ -214,38 +214,74 @@
 .sc-match-row.is-done   .sc-match-brand { color: var(--sc-preferred-fg); }
 .sc-match-row.is-flight .sc-match-brand { font-style: italic; }
 
-/* === PLAN-HERO MEAL TILES ========================================== */
-/* The home hero's meal tiles are Streamlit buttons (each meal opens from
-   the home screen), so they get styled back down to look like the tile
-   titles they replaced: no chrome until you hover. Streamlit stamps a
-   st-key-<key> class on every keyed widget; these are keyed mph_tile_*.
-   If a Streamlit build ever drops that class the buttons still work — they
-   just look like ordinary buttons. */
+/* === PLAN-HERO MEAL CARDS ========================================== */
+/* Each meal on the planner home is one card — art + title + meta — clickable
+   anywhere inside its boundary. Streamlit can't put markup inside a button,
+   so mealplan_home renders the card markup and a button together inside a
+   keyed container, and the rules below lift that button out of the flow and
+   stretch it across the container as an invisible hit layer.
 
-[class*="st-key-mph_tile_"] button {
-  border: 1px solid transparent;
-  background: transparent;
-  padding: 4px 6px;
-  min-height: 0;
-  line-height: 1.25;
-  font-size: 13px;
-  font-weight: 600;
-  color: inherit;
+   Keys carry the state: mph_card_on_* is openable, mph_card_off_* means the
+   recipe is gone from the library — no hit layer, no hover affordance.
+
+   The button carries no help= tooltip on purpose: the tooltip wrappers
+   Streamlit adds around it cannot be stretched to fill the card.
+
+   If this stylesheet ever fails to load, the button renders under the card
+   with the recipe title on it — still clickable, only uglier. */
+
+[class*="st-key-mph_card_on_"],
+[class*="st-key-mph_card_off_"] {
+  position: relative;
+  border: 1px solid var(--sc-border-soft);
+  border-radius: 12px;
+  background: #ffffff;
+  padding: 12px 8px;
+  transition: border-color 160ms ease, background 160ms ease, box-shadow 160ms ease;
 }
-[class*="st-key-mph_tile_"] button p {
-  font-size: 13px;
-  font-weight: 600;
-  line-height: 1.25;
-}
-[class*="st-key-mph_tile_"] button:hover:not(:disabled) {
+
+[class*="st-key-mph_card_on_"] { cursor: pointer; }
+[class*="st-key-mph_card_on_"]:hover {
   border-color: var(--sc-green-200);
   background: var(--sc-green-50);
-  color: var(--sc-green-900);
+  box-shadow: 0 1px 5px rgba(0, 0, 0, 0.06);
 }
-[class*="st-key-mph_tile_"] button:disabled {
+
+/* Nothing to open: muted, and the (disabled) button is hidden entirely. */
+[class*="st-key-mph_card_off_"] { opacity: 0.6; }
+[class*="st-key-mph_card_off_"] [class*="st-key-mph_tile_"] { display: none; }
+
+/* The button becomes the card's hit layer: same box, no chrome, no text. */
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  z-index: 2;
+}
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] .stButton { height: 100%; }
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] button {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  box-shadow: none;
+  color: transparent;
+}
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] button p { color: transparent; }
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] button:hover,
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] button:active {
   border-color: transparent;
   background: transparent;
-  color: var(--sc-fg-muted);
+  color: transparent;
+}
+
+/* Keyboard users still need to see where they are. */
+[class*="st-key-mph_card_on_"] [class*="st-key-mph_tile_"] button:focus-visible {
+  outline: 2px solid var(--sc-green-200);
+  outline-offset: 2px;
 }
 
 /* === FOOTER BAR (kept from source) ================================= */

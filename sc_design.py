@@ -20,6 +20,7 @@ Why HTML strings (not st.* widgets)?
 from __future__ import annotations
 
 from typing import Literal, Optional
+from recipe_units import format_minutes
 
 
 # ---------------------------------------------------------------------------
@@ -129,22 +130,30 @@ def _hero_meta(recipe: dict) -> str:
     if cu:
         bits.append(cu[0].title())
     if recipe.get("ready_in_minutes"):
-        bits.append(f"{recipe['ready_in_minutes']}m")
+        bits.append(format_minutes(recipe["ready_in_minutes"], short=True))
     return " · ".join(bits)
 
 
-def hero_tile_art(recipe: dict, size: int = 60) -> str:
-    """Centered art/photo for one hero meal tile."""
-    art = recipe_tile_html(recipe or {}, size=size)
-    return f'<div style="display:flex; justify-content:center;">{art}</div>'
+def hero_tile_card(recipe: dict, fallback_title: str = "", size: int = 60) -> str:
+    """One hero meal tile — art, title and meta as a single block.
 
-
-def hero_tile_meta(recipe: dict) -> str:
-    """The 'Japanese · 35m' line that sits under a hero tile's title."""
+    The whole block is the click target: `screens/mealplan_home` renders a
+    Streamlit button alongside it inside a keyed container, and style.css
+    stretches that button over this markup (see `.st-key-mph_card_*`). It has
+    to be one element so the card reads — and highlights — as one thing.
+    """
     import html as _html
+    title = _html.escape((recipe or {}).get("title") or fallback_title or "(untitled)")
     meta = _html.escape(_hero_meta(recipe)) if recipe else "—"
-    return (f'<div style="font-size:11.5px; color:{P["fg_muted"]}; '
-            f'text-align:center; line-height:1.3; margin-top:-6px;">{meta}</div>')
+    art = recipe_tile_html(recipe or {}, size=size)
+    return (
+        f'<div style="min-width:0; text-align:center;">'
+        f'<div style="display:flex; justify-content:center;">{art}</div>'
+        f'<div style="font-size:13px; font-weight:600; color:{P["fg"]}; '
+        f'margin-top:8px; line-height:1.25;">{title}</div>'
+        f'<div style="font-size:11.5px; color:{P["fg_muted"]}; '
+        f'margin-top:2px; line-height:1.3;">{meta or "&nbsp;"}</div></div>'
+    )
 
 
 def plan_hero_header(*, tone: Literal["green", "amber"], heading: str,

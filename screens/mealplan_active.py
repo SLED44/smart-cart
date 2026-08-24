@@ -20,6 +20,7 @@ from screens._shared import clear_review_widget_state, go
 from screens import _recipe_view
 from sc_design import reason_chips, planner_card
 from applog import get_logger, log_items
+from recipe_units import format_minutes
 
 _log = get_logger(__name__)
 
@@ -34,7 +35,7 @@ def _meta_line(recipe: dict) -> str:
     if recipe.get("proteins"):
         bits.append("/".join(recipe["proteins"]))
     if recipe.get("ready_in_minutes"):
-        bits.append(f"{recipe['ready_in_minutes']} min")
+        bits.append(format_minutes(recipe["ready_in_minutes"]))
     return " · ".join(bits)
 
 

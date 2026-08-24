@@ -15,6 +15,7 @@ from mealplan import library
 from mealplan.rules import load_rules, save_rules
 
 from screens._shared import go
+from recipe_units import format_minutes
 
 DEFAULT_FAV_CADENCE = [4, 6]
 
@@ -293,7 +294,7 @@ def _render_preview_and_save(parsed: dict):
         if parsed.get("proteins"):
             meta.append("· " + "/".join(parsed["proteins"]))
         if parsed.get("ready_in_minutes"):
-            meta.append(f"· {parsed['ready_in_minutes']} min")
+            meta.append(f"· {format_minutes(parsed['ready_in_minutes'])}")
         if parsed.get("servings_original"):
             meta.append(f"· serves {parsed['servings_original']}")
         if meta:

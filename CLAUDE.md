@@ -65,6 +65,18 @@ The visual layer was built from a Claude Design hand-off (May 2026). Architectur
 
 To add a new visual primitive you can now use either approach: a `.sc-*` class in `style.css`, or inline `PALETTE` colors in an `sc_design.py` helper. Existing helpers are all inline-styled; see the DRY-the-colors backlog item.
 
+**Making a whole card clickable.** Streamlit can't put markup inside a button,
+so the pattern (used by the planner home's meal cards) is: render the card
+markup and a `st.button` together inside `st.container(key="...")`, then use
+the `.st-key-<key>` class the container gets to (a) draw the card's border and
+hover state, and (b) lift the button out of the flow — `position:absolute;
+inset:0` on its element container, transparent background and `color:
+transparent` — so it becomes an invisible hit layer over the whole card. See
+`.st-key-mph_card_on_*` in `style.css`. Two gotchas: passing `help=` to that
+button wraps it in tooltip spans that can't be stretched, and the fallback if
+the stylesheet ever fails to load is an ordinary titled button under the card
+(still clickable) — so keep the button's label meaningful.
+
 ### Persistent login
 `st.session_state` dies with the WebSocket, so the bare `authenticated` flag
 logged you out on every refresh, on the Kroger OAuth round-trip, and after each
@@ -176,6 +188,11 @@ Rough priority order. Pick from the top.
   every multi-quantity item, not just cans) and has never been observed
   firing, but it turns a partial failure into a wrong cart with no warning.
   Worth making the retry report a partial add so the summary screen shows it.
+- **Cook times are minutes in the data and hours on screen.** Slow-cooker
+  recipes legitimately carry 400-500 `ready_in_minutes` (10 in the library do),
+  and "500 min" reads as a bug. Every screen renders time through
+  `recipe_units.format_minutes()` → "8 hr 20 min" (or "8h 20m" on the compact
+  home tiles). Don't format it inline again.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
 - **Supabase free-tier pausing can't be reliably prevented — so the keepalive self-heals instead.** Learned July 2026 in two stages: (1) read-only GET pings don't count as "sufficient activity"; (2) even a daily *verified write* didn't stop the 2026-07-08 pause — Supabase paused the project one minute after a successful write, because once their scanner flags a project the pause proceeds anyway. `.github/workflows/keepalive.yml` (v3) runs daily (09:23 UTC), upserts kv key `keepalive:last_ping` and verifies it via a per-run nonce; if the write fails because the project is paused, it **auto-restores** via the Supabase Management API, waits for `ACTIVE_HEALTHY`, and retries. It also re-enables itself via the GitHub API to reset GitHub's 60-day scheduled-workflow disable timer. GitHub only emails a failure when auto-restore itself fails — that's when a human needs https://supabase.com/dashboard/project/odwkznptayhobwjgegin. Unpausing is **free** within 90 days of a pause (never a paid unlock); past 90 days the project is unrecoverable (data export only). Required repo secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ACCESS_TOKEN` (personal access token for the restore path).
 - **Streamlit CSS gotchas** to remember — all of them are the sanitizer, and all of them fail *silently*:

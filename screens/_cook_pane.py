@@ -26,6 +26,7 @@ import html
 import json
 
 from sc_design import recipe_art
+from recipe_units import format_minutes
 
 PANE_HEIGHT = 740  # iframe height; header + two columns that scroll inside it.
 
@@ -147,7 +148,7 @@ def _build_header(recipe: dict) -> str:
 
     chips = []
     if recipe.get("ready_in_minutes"):
-        chips.append(f'⏱ {html.escape(str(recipe["ready_in_minutes"]))} min')
+        chips.append(f'⏱ {html.escape(format_minutes(recipe["ready_in_minutes"]))}')
     if recipe.get("prep_minutes"):
         chips.append(f'🔪 {html.escape(str(recipe["prep_minutes"]))} min prep')
     if recipe.get("cook_minutes"):
