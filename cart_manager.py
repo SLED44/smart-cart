@@ -282,7 +282,10 @@ def _build_cart_result(
             item_result["cart_status"] = "added"
             item_result["cart_error"]  = None
             # Kroger accepted it only without a quantity, so it holds 1.
-            item_result["qty_dropped"] = upc in qty_dropped_set
+            # Keyed by UPC, so an item that asked for exactly 1 isn't flagged
+            # just because another line shared its UPC.
+            item_result["qty_dropped"] = (upc in qty_dropped_set
+                                          and max(1, round(item.get("quantity", 1))) != 1)
             succeeded.append(item_result)
 
             # Add to estimated total

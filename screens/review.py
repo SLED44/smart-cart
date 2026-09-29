@@ -101,6 +101,7 @@ def render():
         smart = product_matcher.coverage_quantity(item, current)
         if smart is not None and not st.session_state.get(f"qty_user_edited_{idx}"):
             st.session_state[qty_key] = max(1.0, float(smart))
+            st.session_state[f"qty_default_{idx}"] = st.session_state[qty_key]
 
     col_qty, col_hint = st.columns([1, 2])
     with col_qty:
