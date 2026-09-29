@@ -1028,7 +1028,8 @@ def protein_target_tests(t: "_T") -> None:
 
     def fake_filter(cuisine=None, protein=None, status=None, name_search=None):
         return [r for r in swap_lib
-                if not protein or protein in r.get("proteins", [])]
+                if (not protein or protein in r.get("proteins", []))
+                and (not cuisine or cuisine in r.get("cuisines", []))]
 
     orig = (_libmod.filter, _libmod.get, _evt.feedback_signals)
     _libmod.filter = fake_filter
@@ -1060,6 +1061,12 @@ def protein_target_tests(t: "_T") -> None:
             third = _swap.get_swap_candidates(0, lineup, rules, cut="pork shoulder",
                                               seen_ids=seen | ids2)
             assert third.candidates == [], [c.recipe["id"] for c in third.candidates]
+
+        @t.case("with a cuisine filter the note blames the filter, not the library")
+        def _():
+            res = _swap.get_swap_candidates(0, lineup, rules, cut="pork shoulder",
+                                            cuisine="american")
+            assert "match these filters" in res.note, res.note
     finally:
         _libmod.filter, _libmod.get, _evt.feedback_signals = orig
 

@@ -153,7 +153,11 @@ def _protein_input(key: str) -> dict | None:
         help="One meal in the plan will use this cut. Replacing that meal "
              "shows only other recipes for the same cut.",
     )
-    return parse_request(text)
+    req = parse_request(text)
+    if text.strip() and req is None:
+        st.warning("Couldn't find a cut in that — try e.g. “1.5 lb pork shoulder”. "
+                   "Planning without it.")
+    return req
 
 
 def _resolve_recipes(slots: list[dict], lib: dict) -> list[tuple[str | None, dict | None]]:

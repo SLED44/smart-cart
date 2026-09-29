@@ -192,9 +192,12 @@ def _cut_candidates(cut, rules, eval_lineup, history, feedback, *,
                                     feedback=feedback, max_level=MAX_RELAXATION_LEVEL)
     result = _top_n(SwapResult(candidates=candidates), n)
     if 0 < len(result.candidates) < n:
-        result.note = (f"No more {cut} recipes in your library after "
-                       f"{'these' if len(result.candidates) != 1 else 'this one'}. "
-                       f"Add more via 📝 Paste a recipe.")
+        after = "these" if len(result.candidates) != 1 else "this one"
+        if cuisine or name_search:
+            result.note = f"No more {cut} recipes match these filters after {after}."
+        else:
+            result.note = (f"No more {cut} recipes in your library after {after}. "
+                           f"Add more via 📝 Paste a recipe.")
     return result
 
 

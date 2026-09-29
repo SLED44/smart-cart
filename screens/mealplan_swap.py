@@ -198,7 +198,10 @@ def render():
 
     st.divider()
     if not result.candidates and cut:
-        if seen_ids:
+        if cuisine_arg or name_arg:
+            st.warning(f"No more {cut} recipes match these filters. Clear the "
+                       f"Cuisine / Name filters to see the rest.")
+        elif seen_ids:
             st.warning(f"You've seen every {cut} recipe in your library. "
                        f"**↻ Reset filters** starts the list over, or untick "
                        f"“Only {cut} recipes” to pick from any protein.")
