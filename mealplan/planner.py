@@ -29,6 +29,7 @@ from mealplan.rules import (
     evaluate_candidate,
     relaxation_label,
 )
+from mealplan.protein_match import recipe_matches
 from applog import get_logger
 
 _log = get_logger(__name__)
@@ -55,6 +56,9 @@ class SlotResult:
 @dataclass
 class LineupResult:
     slots: list[SlotResult] = field(default_factory=list)
+    # Set when generate_lineup was asked for a target cut it couldn't place
+    # (none in the library, or every match ruled out by hard rules).
+    target_note: str = ""
 
     @property
     def recipes(self) -> list[dict]:
@@ -90,6 +94,8 @@ def generate_lineup(
     history: list[dict] | None = None,
     exclude_ids: set[str] | None = None,
     feedback: dict | None = None,
+    target_cut: str | None = None,
+    target_library: list[dict] | None = None,
 ) -> LineupResult:
     """
     Build an N-recipe lineup greedily from ``library``.
@@ -103,6 +109,15 @@ def generate_lineup(
         exclude_ids  recipe ids to penalise heavily (regenerate path)
         feedback     event_log.feedback_signals() result; fetched once here
                      when None (pass {} to disable feedback scoring)
+        target_cut   "use up this protein" (e.g. "pork shoulder"): slot 0 is
+                     filled from recipes using that cut, added_via
+                     "protein_target", and the rest of the lineup plans
+                     around it. If no match survives the hard rules the
+                     lineup plans normally and ``target_note`` says why.
+        target_library  where to look for the target cut (defaults to
+                     ``library``). Lets the caller keep matches the main pool
+                     filters out — a slow-cooker pork shoulder when the
+                     slow-cooker option is off.
 
     Returns LineupResult with one SlotResult per slot.
 
@@ -127,7 +142,32 @@ def generate_lineup(
     result = LineupResult()
     pool = list(library)
 
+    target_pool: list[dict] = []
+    if target_cut:
+        source = pool if target_library is None else list(target_library)
+        target_pool = [r for r in source if recipe_matches(r, target_cut)]
+        if not target_pool:
+            result.target_note = f"No {target_cut} recipes in your library."
+
     for slot_index in range(n):
+        if slot_index == 0 and target_pool:
+            chosen, level = _pick_for_slot(
+                pool=target_pool, already_chosen=[], rules=rules, history=history,
+                exclude_ids=exclude_ids, feedback=feedback,
+            )
+            if chosen is not None:
+                recipe, score, reasons, relaxations = chosen
+                result.slots.append(SlotResult(
+                    recipe=recipe, score=score, relaxation_level=level,
+                    reasons=reasons, relaxations_applied=relaxations,
+                    added_via="protein_target",
+                ))
+                continue
+            result.target_note = (
+                f"{len(target_pool)} {target_cut} recipe"
+                f"{'s' if len(target_pool) != 1 else ''} in your library, but "
+                f"your rules exclude {'all of them' if len(target_pool) != 1 else 'it'}."
+            )
         chosen, level = _pick_for_slot(
             pool=pool,
             already_chosen=[s.recipe for s in result.slots],

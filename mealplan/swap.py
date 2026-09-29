@@ -14,6 +14,7 @@ See PRD §10 for the full spec.
 from dataclasses import dataclass, field
 
 from mealplan import library, spoonacular
+from mealplan.protein_match import recipe_matches
 from mealplan.rules import MAX_RELAXATION_LEVEL, evaluate_candidate, relaxation_label
 
 TARGET_N = 5
@@ -50,6 +51,7 @@ def get_swap_candidates(
     seen_ids: set[str] | None = None,
     n: int = TARGET_N,
     min_match: int = MIN_MATCH,
+    cut: str | None = None,
 ) -> SwapResult:
     """
     Return up to ``n`` ranked swap candidates for ``slot_index``.
@@ -64,6 +66,11 @@ def get_swap_candidates(
     variety/soft-cap penalties can't starve the list down to one or two. If the
     library genuinely has fewer than ``min_match`` of that protein (e.g. lamb),
     it tops up with other proteins, flagged via ``note`` and ranked last.
+
+    ``cut`` is the "use up this protein" mode ("pork shoulder"): candidates
+    are only recipes using that cut, from the library only — no Spoonacular,
+    no other-protein top-up, and ``protein`` is ignored. Paging with
+    ``seen_ids`` walks through every match and then comes back empty.
     """
     history = history or []
     seen_ids = set(seen_ids or [])
@@ -77,6 +84,11 @@ def get_swap_candidates(
         feedback = feedback_signals()
     except Exception:
         feedback = {}
+
+    if cut:
+        return _cut_candidates(cut, rules, eval_lineup, history, feedback,
+                               cuisine=cuisine, name_search=name_search,
+                               skip_ids=seen_ids | excluded_ids, n=n)
 
     # Step 1 — library-side filter (protein-matched when a protein is given).
     pool = library.filter(cuisine=cuisine, protein=protein, name_search=name_search)
@@ -166,6 +178,24 @@ def get_swap_candidates(
                            f"added other proteins to round out the list.")
 
     return _top_n(result, n)
+
+
+def _cut_candidates(cut, rules, eval_lineup, history, feedback, *,
+                    cuisine, name_search, skip_ids, n) -> SwapResult:
+    pool = [r for r in library.filter(cuisine=cuisine, name_search=name_search)
+            if r.get("status") not in (library.STATUS_NEVER_AGAIN, library.STATUS_RETIRED)
+            and r.get("id") not in skip_ids and recipe_matches(r, cut)]
+    candidates = _evaluate_pool(pool, rules, eval_lineup, history, source="library",
+                                feedback=feedback, max_level=0)
+    if len(candidates) < n:
+        candidates = _evaluate_pool(pool, rules, eval_lineup, history, source="library",
+                                    feedback=feedback, max_level=MAX_RELAXATION_LEVEL)
+    result = _top_n(SwapResult(candidates=candidates), n)
+    if 0 < len(result.candidates) < n:
+        result.note = (f"No more {cut} recipes in your library after "
+                       f"{'these' if len(result.candidates) != 1 else 'this one'}. "
+                       f"Add more via 📝 Paste a recipe.")
+    return result
 
 
 def mark_never_again(recipe_id: str, rules: dict) -> dict:

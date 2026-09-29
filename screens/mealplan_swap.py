@@ -7,6 +7,10 @@ session_state too so they survive reruns when the user hits "Give me 5 new".
 
 Library-first; falls back to Spoonacular when both cuisine + protein are
 specified and the library has fewer than 5 eligible candidates (PRD §10.2).
+
+A 🎯 slot (``target_cut`` — "use up this protein") shows only recipes using
+that cut, library only, and "Give me 5 new options" pages through the rest of
+them. Unticking "Only <cut>" drops back to the normal protein filter.
 """
 
 from datetime import datetime, timezone
@@ -61,10 +65,12 @@ _PROTEIN_KEY = "mealplan_swap_protein"
 _NAME_KEY = "mealplan_swap_name_search"
 _SEEN_KEY = "mealplan_swap_seen_ids"
 _INIT_KEY = "mealplan_swap_initialized_for"  # slot the filters were seeded for
+_CUT_ONLY_KEY = "mealplan_swap_cut_only"     # 🎯 slot: restrict to its cut
 
 # Selectbox/text widget keys — cleared between slots so the seeded protein
 # isn't shadowed by a value the widget persisted from a previous slot.
-_WIDGET_KEYS = ("mp_swap_cui_input", "mp_swap_pro_input", "mp_swap_name_input")
+_WIDGET_KEYS = ("mp_swap_cui_input", "mp_swap_pro_input", "mp_swap_name_input",
+                "mp_swap_cut_only_input")
 
 _ANY = "any"
 
@@ -125,15 +131,32 @@ def render():
     # Only seeds once per slot — a user override (incl. "Any protein") sticks.
     if st.session_state.get(_INIT_KEY) != slot_index:
         st.session_state[_PROTEIN_KEY] = _match_protein(current_recipe)
+        st.session_state[_CUT_ONLY_KEY] = True
         st.session_state[_INIT_KEY] = slot_index
 
-    _render_filter_bar(rules)
+    target_cut = current_slot.get("target_cut")
+    protein_req = pending.get("protein_request")
+    if target_cut:
+        cut_only = st.checkbox(f"🎯 Only {target_cut} recipes",
+                               value=bool(st.session_state.get(_CUT_ONLY_KEY, True)),
+                               key="mp_swap_cut_only_input")
+        if cut_only != st.session_state.get(_CUT_ONLY_KEY, True):
+            st.session_state[_CUT_ONLY_KEY] = cut_only
+            st.session_state[_SEEN_KEY] = []
+            st.rerun()
+    cut = target_cut if target_cut and st.session_state.get(_CUT_ONLY_KEY, True) else None
+
+    _render_filter_bar(rules, protein_disabled=bool(cut))
 
     cuisine = st.session_state.get(_CUISINE_KEY, _ANY)
     protein = st.session_state.get(_PROTEIN_KEY, _ANY)
     name_search = st.session_state.get(_NAME_KEY, "")
 
-    if protein != _ANY:
+    if cut:
+        have = (protein_req or {}).get("text") or cut
+        st.caption(f"Using up **{have}** — showing only {cut} recipes from your "
+                   f"library. “Give me 5 new options” pages through the rest.")
+    elif protein != _ANY:
         st.caption(f"Showing **{protein}** options to match this meal — "
                    f"change the Protein filter to broaden.")
 
@@ -158,6 +181,7 @@ def render():
             protein=protein_arg,
             name_search=name_arg,
             seen_ids=seen_ids,
+            cut=cut,
         )
 
     st.divider()
@@ -173,6 +197,16 @@ def render():
                        f"(only happens when library has <5 hits for this filter combo).")
 
     st.divider()
+    if not result.candidates and cut:
+        if seen_ids:
+            st.warning(f"You've seen every {cut} recipe in your library. "
+                       f"**↻ Reset filters** starts the list over, or untick "
+                       f"“Only {cut} recipes” to pick from any protein.")
+        else:
+            st.warning(f"No {cut} recipes in your library fit your rules. Untick "
+                       f"“Only {cut} recipes” to pick from any protein, or add one "
+                       f"via 📝 Paste a recipe.")
+        return
     if not result.candidates:
         st.warning("No candidates after filtering. Try loosening the filter, or pick "
                    "different cuisine + protein for a Spoonacular fallback.")
@@ -191,14 +225,14 @@ def render():
               ", ".join(f"{s['title']}({s['score']:.0f})" for s in shown))
 
     for cand in result.candidates:
-        _render_candidate_card(cand, slot_index, meals, pending, rules, lib)
+        _render_candidate_card(cand, slot_index, meals, pending, rules, lib, cut)
 
 
 # ---------------------------------------------------------------------------
 # Filter bar + action bar
 # ---------------------------------------------------------------------------
 
-def _render_filter_bar(rules: dict):
+def _render_filter_bar(rules: dict, protein_disabled: bool = False):
     cuisines_all = (rules.get("cuisines") or {}).get("rotation_set") \
         or default_rules()["cuisines"]["rotation_set"]
 
@@ -223,7 +257,7 @@ def _render_filter_bar(rules: dict):
             cur = _ANY
         choice = st.selectbox(
             "Protein", options, index=options.index(cur),
-            key=f"mp_swap_pro_input",
+            key=f"mp_swap_pro_input", disabled=protein_disabled,
             format_func=lambda v: "Any protein" if v == _ANY else v.title())
         if choice != cur:
             st.session_state[_PROTEIN_KEY] = choice
@@ -249,7 +283,8 @@ def _render_action_bar(result):
         if st.button("↻ Reset filters", key="mp_swap_reset"):
             # Clearing _INIT_KEY (and the widgets) → render re-seeds protein to
             # match the meal again.
-            for k in (_CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY, *_WIDGET_KEYS):
+            for k in (_CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY,
+                      _CUT_ONLY_KEY, *_WIDGET_KEYS):
                 st.session_state.pop(k, None)
             st.rerun()
     with col_new:
@@ -269,7 +304,8 @@ def _render_action_bar(result):
 # Candidate card
 # ---------------------------------------------------------------------------
 
-def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: dict, rules: dict, lib: dict):
+def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: dict, rules: dict,
+                           lib: dict, cut: str | None = None):
     recipe = cand.recipe
     rid = recipe.get("id", "")
 
@@ -293,6 +329,11 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                 chips_html=reason_chips(chip_items),
                 favorite=_recipe_view.is_favorite(recipe, rules),
             ))
+            if cut:
+                note = _recipe_view.cut_amount_note(recipe, cut,
+                                                    pending.get("protein_request"), rules)
+                if note:
+                    st.caption(f"🎯 {note}")
             if recipe.get("user_notes"):
                 st.caption(f"📝 _{recipe['user_notes'][:120]}_")
             with st.expander(f"Scoring detail · {cand.score:.0f}"):
@@ -306,7 +347,7 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
                 _recipe_view.open_preview(recipe, _recipe_view.compute_scale(recipe, rules))
             if st.button("Pick", type="primary", key=f"mp_swap_pick_{rid}",
                          use_container_width=True):
-                _apply_pick(rid, slot_index, meals, pending, source=cand.source)
+                _apply_pick(rid, slot_index, meals, pending, source=cand.source, cut=cut)
                 return
             if st.button("🚫 Never make", key=f"mp_swap_never_{rid}",
                          use_container_width=True):
@@ -326,11 +367,14 @@ def _render_candidate_card(cand, slot_index: int, meals: list[dict], pending: di
 # Apply pick
 # ---------------------------------------------------------------------------
 
-def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, source: str):
+def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, source: str,
+                cut: str | None = None):
     cuisine = st.session_state.get(_CUISINE_KEY, _ANY)
     protein = st.session_state.get(_PROTEIN_KEY, _ANY)
     name_search = st.session_state.get(_NAME_KEY, "")
-    if name_search:
+    if cut:
+        added_via = "protein_target"
+    elif name_search:
         added_via = "manual_search"
     elif cuisine != _ANY or protein != _ANY:
         added_via = "swap_filtered"
@@ -357,7 +401,8 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
         "new_recipe_id":  rid,
         "new_title":      (new_recipe or {}).get("title", ""),
         "cuisine_filter": None if cuisine == _ANY else cuisine,
-        "protein_filter": None if protein == _ANY else protein,
+        "protein_filter": None if protein == _ANY or cut else protein,
+        "target_cut":     cut,
         "name_search":    name_search.strip() if name_search else "",
         "source":         source,
         "added_via":      added_via,
@@ -377,6 +422,8 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
         "score":            0,
         "relaxation_level": 0,
     }
+    if cut:
+        meals[slot_index]["target_cut"] = cut  # stays 🎯; Replace stays cut-only
     pending["meals"] = meals
     pending["updated_at"] = datetime.now(timezone.utc).isoformat()
     kv_put(KEY_PENDING_LINEUP, pending)
@@ -386,5 +433,6 @@ def _apply_pick(rid: str, slot_index: int, meals: list[dict], pending: dict, sou
 
 
 def _clear_session():
-    for k in (_SLOT_KEY, _CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY, *_WIDGET_KEYS):
+    for k in (_SLOT_KEY, _CUISINE_KEY, _PROTEIN_KEY, _NAME_KEY, _SEEN_KEY, _INIT_KEY,
+              _CUT_ONLY_KEY, *_WIDGET_KEYS):
         st.session_state.pop(k, None)

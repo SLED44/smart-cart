@@ -13,6 +13,7 @@ import streamlit as st
 
 import auth
 from mealplan import library
+from mealplan.protein_match import parse_request
 from mealplan.rules import load_rules
 from sc_design import (
     hero_tile_card,
@@ -126,6 +127,8 @@ def _render_plan_new_section(summary: dict, rules: dict):
         help="When on, the planner works one hands-off slow-cooker dinner into the week.",
     )
 
+    protein_req = _protein_input("mph_plan_protein")
+
     disabled = summary["total"] == 0
     if st.button(
         f"Plan {n} meal{'s' if n != 1 else ''} →",
@@ -135,9 +138,22 @@ def _render_plan_new_section(summary: dict, rules: dict):
         # Stash N + the slow-cooker choice for the propose screen.
         st.session_state.mealplan_propose_n = n
         st.session_state.mealplan_propose_include_sc = include_sc
+        st.session_state.mealplan_propose_protein = protein_req
         st.session_state.mealplan_propose_fresh = True  # propose screen sees this
                                                         # → generate, then clear
         go("mealplan_propose")
+
+
+def _protein_input(key: str) -> dict | None:
+    """Optional "use up this protein" field. Returns the parsed request
+    (protein_match.parse_request) or None when blank."""
+    text = st.text_input(
+        "🎯 Protein to use up (optional)", key=key,
+        placeholder="e.g. 1.5 lb pork shoulder",
+        help="One meal in the plan will use this cut. Replacing that meal "
+             "shows only other recipes for the same cut.",
+    )
+    return parse_request(text)
 
 
 def _resolve_recipes(slots: list[dict], lib: dict) -> list[tuple[str | None, dict | None]]:
@@ -276,6 +292,7 @@ def _render_current_plan_section(current: dict):
             "🍲 Include a slow-cooker meal",
             value=bool(current.get("include_slow_cooker", True)),
             key="mph_replan_sc")
+    replan_protein = _protein_input("mph_replan_protein")
 
     col_active, col_new = st.columns([2, 1])
     with col_active:
@@ -289,6 +306,7 @@ def _render_current_plan_section(current: dict):
             # no pending lineup) it dead-ends on "No plan in progress".
             st.session_state.mealplan_propose_n = replan_n
             st.session_state.mealplan_propose_include_sc = replan_sc
+            st.session_state.mealplan_propose_protein = replan_protein
             st.session_state.mealplan_propose_fresh = True
             go("mealplan_propose")
 

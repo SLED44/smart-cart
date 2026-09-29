@@ -77,6 +77,7 @@ def render():
     # state bump on confirm (so we never persist the per-plan override).
     include_sc = bool(pending.get("include_slow_cooker", _sc_default(rules)))
     eff_rules = with_equipment_target(rules, "slow_cooker", include_sc)
+    protein_req = pending.get("protein_request")
 
     # Top action bar
     col_back, col_reroll, col_confirm = st.columns([1, 2, 2])
@@ -86,7 +87,7 @@ def render():
     with col_reroll:
         if st.button(f"🔄 Give me {n} new options",
                      use_container_width=True, key="mp_propose_reroll"):
-            _reroll(n, eff_rules, meals, include_sc)
+            _reroll(n, eff_rules, meals, include_sc, protein_req)
     with col_confirm:
         all_filled = all(m.get("recipe_id") for m in meals)
         if st.button("✓ Confirm plan", type="primary",
@@ -112,7 +113,7 @@ def render():
     if new_sc != include_sc:
         regen = _generate_pending(len(meals) or n,
                                   with_equipment_target(rules, "slow_cooker", new_sc),
-                                  include_sc=new_sc)
+                                  include_sc=new_sc, protein_request=protein_req)
         if regen is not None:
             regen["include_slow_cooker"] = new_sc
             kv_put(KEY_PENDING_LINEUP, regen)
@@ -126,6 +127,20 @@ def render():
     # times (why-panel + reason chips + each slot card).
     lib = library.get_all()
 
+    if protein_req:
+        target_slots = [m for m in meals if m.get("target_cut")]
+        if target_slots:
+            st.info(f"🎯 Using up **{protein_req['text']}** in slot "
+                    f"{target_slots[0].get('slot', 0) + 1}. Replace it to see "
+                    f"other {protein_req['cut']} recipes.")
+        elif pending.get("target_note"):
+            # Generation couldn't place the cut (none in the library, or all
+            # ruled out) — say so rather than silently planning without it.
+            st.warning(f"🎯 {pending['target_note']} Planned the week without "
+                       f"**{protein_req['text']}**.")
+        else:
+            st.caption(f"🎯 No meal is using up **{protein_req['text']}** any more.")
+
     # "Why these picks?" — recompute lineup_meta from current recipes
     _render_why_panel(meals, eff_rules, lib)
 
@@ -135,7 +150,7 @@ def render():
     lineup_recipes = [lib.get(m.get("recipe_id")) for m in meals if m.get("recipe_id")]
     lineup_recipes = [r for r in lineup_recipes if r]
     for slot in meals:
-        _render_slot_card(slot, lineup_recipes, rules, lib)
+        _render_slot_card(slot, lineup_recipes, rules, lib, protein_req)
 
 
 # ---------------------------------------------------------------------------
@@ -158,8 +173,9 @@ def _load_or_generate(rules: dict) -> dict | None:
                 or (rules.get("household") or {}).get("meals_per_week_default") or 5)
         include_sc = bool(st.session_state.pop("mealplan_propose_include_sc",
                                                _sc_default(rules)))
+        protein_req = st.session_state.pop("mealplan_propose_protein", None)
         pending = _generate_pending(n, with_equipment_target(rules, "slow_cooker", include_sc),
-                                    include_sc=include_sc)
+                                    include_sc=include_sc, protein_request=protein_req)
         if pending is None:
             return None
         pending["include_slow_cooker"] = include_sc
@@ -197,11 +213,13 @@ def _resize_pending(pending: dict, new_n: int, rules: dict, include_sc: bool = T
     kv_put(KEY_PENDING_LINEUP, pending)
 
 
-def _active_pool(include_sc: bool) -> list[dict]:
+def _active_pool(include_sc: bool, pool: list[dict] | None = None) -> list[dict]:
     """Active recipes for planning. When the slow-cooker option is off, drop
     slow-cooker recipes so 'don't include one' actually means none appear (not
-    just 'no bonus'). Toggle ON keeps the full pool + the +score bias."""
-    pool = library.all_active()
+    just 'no bonus'). Toggle ON keeps the full pool + the +score bias.
+    ``pool`` is an already-fetched ``library.all_active()``."""
+    if pool is None:
+        pool = library.all_active()
     if include_sc:
         return pool
     return [r for r in pool
@@ -209,9 +227,17 @@ def _active_pool(include_sc: bool) -> list[dict]:
 
 
 def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None,
-                      include_sc: bool = True) -> dict | None:
-    """Run the planner and wrap the result in a pending_lineup dict."""
-    pool = _active_pool(include_sc)
+                      include_sc: bool = True,
+                      protein_request: dict | None = None) -> dict | None:
+    """Run the planner and wrap the result in a pending_lineup dict.
+
+    ``protein_request`` (protein_match.parse_request) fills slot 1 with a
+    recipe using that cut. Its matches come from every active recipe, so a
+    slow-cooker pork shoulder still counts with the slow-cooker option off.
+    """
+    active = library.all_active()
+    pool = _active_pool(include_sc, active)
+    cut = (protein_request or {}).get("cut")
     if not pool:
         st.error("Library is empty. Run **🌱 Bootstrap library** first (home → Settings).")
         if st.button("← Back to home", key="mp_propose_empty"):
@@ -220,7 +246,8 @@ def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None,
 
     history = kv_get(KEY_HISTORY, []) or []
     try:
-        result = generate_lineup(n, rules, pool, history=history, exclude_ids=exclude_ids)
+        result = generate_lineup(n, rules, pool, history=history, exclude_ids=exclude_ids,
+                                 target_cut=cut, target_library=active)
     except NoCandidatesError as e:
         st.error(
             f"Couldn't fill slot {e.slot_index + 1} — hard rules wiped the pool. "
@@ -234,13 +261,18 @@ def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None,
 
     pending = {
         "n":          n,
-        "meals":      [_slot_to_dict(i, s) for i, s in enumerate(result.slots)],
+        "meals":      [_slot_to_dict(i, s, cut) for i, s in enumerate(result.slots)],
         "updated_at": _now_iso(),
     }
+    if protein_request:
+        pending["protein_request"] = protein_request
+        pending["target_note"] = result.target_note
     # Telemetry — record the original proposal before user touches it.
     log_event(EVT_PLAN_PROPOSED, {
         "n":            n,
         "is_regenerate": bool(exclude_ids),
+        "protein_request": protein_request,
+        "target_note":  result.target_note,
         "meals": [
             {"recipe_id": s.recipe.get("id"),
              "title":     s.recipe.get("title"),
@@ -257,8 +289,8 @@ def _generate_pending(n: int, rules: dict, exclude_ids: set[str] | None = None,
     return pending
 
 
-def _slot_to_dict(i: int, s: SlotResult) -> dict:
-    return {
+def _slot_to_dict(i: int, s: SlotResult, cut: str | None = None) -> dict:
+    d = {
         "slot":             i,
         "recipe_id":        s.recipe.get("id"),
         "added_via":        s.added_via,
@@ -267,12 +299,17 @@ def _slot_to_dict(i: int, s: SlotResult) -> dict:
         "reasons":          list(s.reasons),
         "relaxations":      list(s.relaxations_applied),
     }
+    if cut and s.added_via == "protein_target":
+        d["target_cut"] = cut  # the swap screen keeps Replace to this cut
+    return d
 
 
-def _reroll(n: int, rules: dict, current_meals: list[dict], include_sc: bool = True):
+def _reroll(n: int, rules: dict, current_meals: list[dict], include_sc: bool = True,
+            protein_request: dict | None = None):
     prior_ids = {m.get("recipe_id") for m in current_meals if m.get("recipe_id")}
     with st.spinner("Rerolling lineup…"):
-        new_pending = _generate_pending(n, rules, exclude_ids=prior_ids, include_sc=include_sc)
+        new_pending = _generate_pending(n, rules, exclude_ids=prior_ids, include_sc=include_sc,
+                                        protein_request=protein_request)
     if new_pending is not None:
         # Telemetry — separate from plan_proposed so summary can count
         # rerolls distinctly.
@@ -290,11 +327,15 @@ def _reroll(n: int, rules: dict, current_meals: list[dict], include_sc: bool = T
 # Per-slot card
 # ---------------------------------------------------------------------------
 
-def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: dict):
+def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: dict,
+                      protein_req: dict | None = None):
     rid = slot.get("recipe_id")
     recipe = lib.get(rid) if rid else None
 
     slot_label = f"Slot {slot.get('slot', 0) + 1}"
+    cut = slot.get("target_cut")
+    if cut:
+        slot_label = f"🎯 {slot_label} · {cut}"
 
     with st.container(border=True):
         col_body, col_actions = st.columns([5, 1])
@@ -313,6 +354,10 @@ def _render_slot_card(slot: dict, lineup_recipes: list[dict], rules: dict, lib: 
                     chips_html=reason_chips(chips) if chips else "",
                     favorite=_recipe_view.is_favorite(recipe, rules),
                 ))
+                if cut:
+                    note = _recipe_view.cut_amount_note(recipe, cut, protein_req, rules)
+                    if note:
+                        st.caption(f"🎯 {note}")
                 # Raw scoring detail stays available but tucked away.
                 if slot.get("reasons") or slot.get("relaxations"):
                     with st.expander("Scoring detail"):

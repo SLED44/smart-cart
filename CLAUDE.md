@@ -205,6 +205,17 @@ Rough priority order. Pick from the top.
   - Debugging tip: `st.html` sends style-only payloads to Streamlit's *event* container, not the main tree, so don't panic when the `<style>` isn't where you expect. To check whether a sheet actually landed, look for one of its selectors in `document.styleSheets` rather than for the tag.
 
 - **Diagnosing a bad order: read `run_log` first.** Every cart post writes an item-level trace to kv key `run_log` (last 10 runs): the raw list text, and per item the requested qty → review default → qty sent → qty in cart, matched UPC/product/size, Kroger `sold_by` (UNIT vs WEIGHT), edits, swaps, and `qty_dropped`. Query: `select value->-1 from kv where key='run_log'`. Streamlit Cloud stdout (`STAGE`/`PARSE`/`MATCH`/`REVIEW`/`AUTO`/`CART` lines) is lost on container recycle, so don't rely on it after the fact.
+- **"Use up this protein" matches the cut, not the animal.** The planner home's
+  🎯 field ("1.5 lb pork shoulder") fills slot 1 with a recipe using that cut
+  (`added_via: "protein_target"`, slot carries `target_cut`); Replace on that
+  slot is cut-only and "5 new options" pages until the library runs out.
+  Proteins are only tagged `pork`/`beef`, so `mealplan/protein_match.py`
+  matches ingredient *names* word-for-word ("pork loin" ≠ "pork tenderloin",
+  butt = shoulder, broth/sauce never count; a bare "fish" falls back to the
+  tag). **Library only, by decision (2026-09-28)** — no Spoonacular, no LLM;
+  when a cut runs dry the screens say so and point at Paste recipe. Target
+  matches ignore the slow-cooker toggle (both shoulder recipes are
+  slow-cooker). Tests: `protein_target_tests` in `mealplan/_tests.py`.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners
@@ -227,4 +238,4 @@ python3 kroger_auth.py --reauth
 ```
 
 ---
-*Last update: 2026-08-22 — persistent login (`auth.py` signed cookie; sign-out in meal-planner settings) and clickable meal tiles on the meal-planner home (each meal opens straight into cooking mode). Previous: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
+*Last update: 2026-09-28 — "use up this protein" 🎯 slot on the meal planner (cut-level matching, library only). Previous: 2026-08-22 — persistent login (`auth.py` signed cookie; sign-out in meal-planner settings) and clickable meal tiles on the meal-planner home (each meal opens straight into cooking mode). Previous: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*

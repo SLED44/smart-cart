@@ -19,6 +19,7 @@ import re
 
 import streamlit as st
 
+from mealplan.protein_match import amount_note, ingredient_lb, matching_ingredient
 from sc_design import recipe_tile_html
 
 
@@ -48,6 +49,15 @@ def compute_scale(recipe: dict, rules: dict) -> float:
     household = int(((rules.get("household") or {}).get("size")) or 4) or 4
     original = int(recipe.get("servings_original") or 4) or 4
     return household / original
+
+
+def cut_amount_note(recipe: dict, cut: str, protein_req: dict | None, rules: dict) -> str:
+    """'uses 3 lb — you have 1.5 lb' for a "use up this protein" slot, at the
+    household's scaled amount. '' when the recipe's amount isn't a weight."""
+    need = ingredient_lb(matching_ingredient(recipe, cut))
+    if need:
+        need *= compute_scale(recipe, rules)
+    return amount_note((protein_req or {}).get("amount_lb"), need)
 
 
 _KITCHEN_FRACTIONS = (

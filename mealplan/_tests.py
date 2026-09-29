@@ -914,6 +914,156 @@ def time_format_tests(t: "_T") -> None:
             assert format_minutes(bad) == "", f"{bad!r} -> {format_minutes(bad)!r}"
 
 
+def protein_target_tests(t: "_T") -> None:
+    """"Use up this protein" — cut-level matching, the 🎯 planner slot, and
+    cut-only swap paging (library only, never other proteins)."""
+    from mealplan.protein_match import (
+        amount_note, ingredient_lb, matching_ingredient, parse_request, recipe_matches,
+    )
+    from mealplan import swap as _swap
+    from mealplan import library as _libmod
+    from mealplan import event_log as _evt
+
+    def ing(name, amount=1.0, unit="lb"):
+        return {"name": name, "amount": amount, "unit": unit}
+
+    def C(id, meat, proteins, cuisines=("american",), equipment=None, amount=2.0):
+        r = R(id, cuisines=list(cuisines), proteins=list(proteins), carbs=["rice"],
+              equipment=equipment)
+        r["ingredients"] = [ing(meat, amount), ing("chicken broth", 2, "cup")]
+        return r
+
+    @t.case("parse_request reads amount + unit + cut")
+    def _():
+        assert parse_request("1.5 lbs pork shoulder") == \
+            {"text": "1.5 lbs pork shoulder", "cut": "pork shoulder", "amount_lb": 1.5}
+        assert parse_request("2lbs pork loin")["amount_lb"] == 2.0
+        assert parse_request("1 1/2 lb pork butt")["amount_lb"] == 1.5
+        assert parse_request("12 oz ground pork")["amount_lb"] == 0.75
+        assert parse_request("pork shoulder")["amount_lb"] is None
+
+    @t.case("a bare count is not a weight; blank input is no request")
+    def _():
+        r = parse_request("2 pork chops")
+        assert r["cut"] == "pork chops" and r["amount_lb"] is None, r
+        assert parse_request("") is None and parse_request("   ") is None
+
+    @t.case("cuts match on whole words: pork loin is not pork tenderloin")
+    def _():
+        tl = C("tl", "pork tenderloin", ["pork"])
+        loin = C("loin", "boneless pork loin roast", ["pork"])
+        assert not recipe_matches(tl, "pork loin")
+        assert recipe_matches(loin, "pork loin")
+
+    @t.case("butt == shoulder; plurals and descriptors don't matter")
+    def _():
+        assert recipe_matches(C("a", "Boston pork butt", ["pork"]), "pork shoulder")
+        assert recipe_matches(C("b", "boneless skinless chicken thighs", ["chicken"]),
+                              "chicken thigh")
+
+    @t.case("broth and sauces never count as the protein")
+    def _():
+        veg = R("v", proteins=["plant"])
+        veg["ingredients"] = [ing("chicken broth", 4, "cup"), ing("fish sauce", 1, "tbsp")]
+        assert matching_ingredient(veg, "chicken") is None
+        assert matching_ingredient(veg, "fish") is None
+
+    @t.case("a bare animal name falls back to the protein tag (fish -> salmon)")
+    def _():
+        salmon = C("s", "salmon fillets", ["fish"])
+        assert recipe_matches(salmon, "fish")
+        assert not recipe_matches(salmon, "pork")
+
+    @t.case("amount note converts to lb and compares to what you have")
+    def _():
+        assert ingredient_lb(ing("x", 24, "oz")) == 1.5
+        assert ingredient_lb(ing("x", 2, "")) is None
+        assert amount_note(1.5, 3.0) == "uses 3 lb — you have 1.5 lb"
+        assert amount_note(None, 2.5) == "uses 2.5 lb"
+        assert amount_note(1.5, None) == ""
+
+    lib = synthetic_library() + [
+        C("pork_sh_a", "pork shoulder", ["pork"], cuisines=["mexican"], equipment=["slow_cooker"]),
+        C("pork_sh_b", "pork shoulder", ["pork"], cuisines=["american"]),
+        C("pork_chop", "pork chops", ["pork"]),
+    ]
+    rules = default_rules()
+
+    @t.case("target cut fills slot 1 with a matching recipe, flagged protein_target")
+    def _():
+        res = generate_lineup(4, rules, lib, history=[], feedback={}, target_cut="pork shoulder")
+        s0 = res.slots[0]
+        assert s0.recipe["id"] in ("pork_sh_a", "pork_sh_b"), s0.recipe["id"]
+        assert s0.added_via == "protein_target"
+        assert res.target_note == ""
+        assert all(s.added_via != "protein_target" for s in res.slots[1:])
+
+    @t.case("target_library finds the cut even when the main pool dropped it")
+    def _():
+        no_sc = [r for r in lib if r["id"] != "pork_sh_a"
+                 and r["id"] != "pork_sh_b"]  # e.g. slow-cooker option off
+        res = generate_lineup(3, rules, no_sc, history=[], feedback={},
+                              target_cut="pork shoulder", target_library=lib)
+        assert res.slots[0].recipe["id"] in ("pork_sh_a", "pork_sh_b")
+
+    @t.case("no match in the library -> normal plan plus a note, never a crash")
+    def _():
+        res = generate_lineup(3, rules, lib, history=[], feedback={}, target_cut="pork loin")
+        assert len(res.slots) == 3
+        assert "No pork loin recipes" in res.target_note, res.target_note
+        assert all(s.added_via != "protein_target" for s in res.slots)
+
+    @t.case("matches all excluded by rules -> note says so, plan still fills")
+    def _():
+        r2 = default_rules()
+        r2["exclusions"] = ["pork_sh_a", "pork_sh_b"]
+        res = generate_lineup(3, r2, lib, history=[], feedback={}, target_cut="pork shoulder")
+        assert len(res.slots) == 3
+        assert "exclude all of them" in res.target_note, res.target_note
+
+    # --- swap: cut-only paging --------------------------------------------
+    extra = [C(f"sh_{i}", "pork shoulder", ["pork"], cuisines=["mexican"]) for i in range(6)]
+    swap_lib = lib + extra
+    by_id = {r["id"]: r for r in swap_lib}
+
+    def fake_filter(cuisine=None, protein=None, status=None, name_search=None):
+        return [r for r in swap_lib
+                if not protein or protein in r.get("proteins", [])]
+
+    orig = (_libmod.filter, _libmod.get, _evt.feedback_signals)
+    _libmod.filter = fake_filter
+    _libmod.get = lambda rid: by_id.get(rid)
+    _evt.feedback_signals = lambda *a, **k: {}
+    try:
+        lineup = [by_id["pork_sh_a"], lib[0]]
+
+        @t.case("cut-only swap shows 5 of that cut, never other proteins")
+        def _():
+            res = _swap.get_swap_candidates(0, lineup, rules, protein="chicken",
+                                            cut="pork shoulder")
+            ids = [c.recipe["id"] for c in res.candidates]
+            assert len(ids) == 5, ids
+            assert all(recipe_matches(by_id[i], "pork shoulder") for i in ids), ids
+            assert "pork_sh_a" not in ids  # the slot's current pick
+            assert not res.spoonacular_attempted
+
+        @t.case("'5 more' pages through the rest, then comes back empty")
+        def _():
+            first = _swap.get_swap_candidates(0, lineup, rules, cut="pork shoulder")
+            seen = {c.recipe["id"] for c in first.candidates}
+            second = _swap.get_swap_candidates(0, lineup, rules, cut="pork shoulder",
+                                               seen_ids=seen)
+            ids2 = {c.recipe["id"] for c in second.candidates}
+            assert ids2 and not (ids2 & seen), (seen, ids2)
+            assert len(ids2) == 2, ids2  # 7 other shoulder recipes: 5 + 2
+            assert "No more pork shoulder" in second.note, second.note
+            third = _swap.get_swap_candidates(0, lineup, rules, cut="pork shoulder",
+                                              seen_ids=seen | ids2)
+            assert third.candidates == [], [c.recipe["id"] for c in third.candidates]
+    finally:
+        _libmod.filter, _libmod.get, _evt.feedback_signals = orig
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
@@ -923,6 +1073,7 @@ def main() -> int:
     swap_tests(t)
     equipment_target_tests(t)
     time_format_tests(t)
+    protein_target_tests(t)
     return t.summary()
 
 
