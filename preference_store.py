@@ -45,8 +45,10 @@ from supabase_kv import kv_get, kv_put
 KEY_PREFERENCES = "preferences"
 KEY_STAPLES     = "staples"
 KEY_SESSION_LOG = "session_log"
+KEY_RUN_LOG     = "run_log"
 
 MAX_SESSION_LOG_ENTRIES = 10
+MAX_RUN_LOG_ENTRIES     = 10
 
 
 def _now_iso() -> str:
@@ -369,6 +371,21 @@ def append_session_log(session_data: dict) -> None:
         log = log[-MAX_SESSION_LOG_ENTRIES:]
 
     kv_put(KEY_SESSION_LOG, log)
+
+
+def append_run_log(trace: dict) -> None:
+    """
+    Persist one shopping run's item-level trace (raw list text, and for every
+    item: requested qty, matched product/UPC/soldBy, qty sent to Kroger,
+    edits, swaps, cart errors). Kept separate from session_log so the home
+    stats read stays small. Rolling window of MAX_RUN_LOG_ENTRIES.
+
+    Diagnose a bad order with:
+        select value->-1 from kv where key = 'run_log';
+    """
+    log = kv_get(KEY_RUN_LOG, []) or []
+    log.append({"date": _now_iso(), **trace})
+    kv_put(KEY_RUN_LOG, log[-MAX_RUN_LOG_ENTRIES:])
 
 
 def get_session_log() -> list:

@@ -44,7 +44,7 @@ import requests
 from dotenv import load_dotenv
 
 from kroger_auth import get_valid_token
-from preference_store import append_session_log
+from preference_store import append_run_log, append_session_log
 from applog import get_logger
 
 _log = get_logger(__name__)
@@ -91,28 +91,31 @@ def _build_cart_items(confirmed_items: list) -> list[dict]:
             continue
 
         quantity = max(1, round(item.get("quantity", 1)))
-        _log.info("CART %r: qty=%s upc=%s (%r)",
+        _log.info("CART %r: qty=%s upc=%s (%r, %s, soldBy=%s)",
                   item.get("item_name", "?"), quantity, upc,
-                  primary.get("product_name", "?"))
+                  primary.get("product_name", "?"), primary.get("size", ""),
+                  primary.get("sold_by", ""))
         cart_items.append({"upc": upc, "quantity": quantity})
 
     return cart_items
 
 
-def _post_batch(cart_items: list, token: str) -> tuple[list, list]:
+def _post_batch(cart_items: list, token: str) -> tuple[list, list, list]:
     """
     Attempt to post a batch of items to the Kroger cart.
 
-    Returns (succeeded_upcs, failed_items) where:
-        succeeded_upcs: list of UPCs that were accepted
-        failed_items:   list of dicts with upc, quantity, error
+    Returns (succeeded_upcs, failed_items, qty_dropped_upcs) where:
+        succeeded_upcs:   list of UPCs that were accepted
+        failed_items:     list of dicts with upc, quantity, error
+        qty_dropped_upcs: accepted only after re-posting WITHOUT a quantity,
+                          so Kroger added 1 regardless of what was asked
 
     Handles the PRD Open Question #2 ambiguity:
     - Tries batch with quantity field first
     - If that fails with a 4xx, falls back to individual calls
     """
     if not cart_items:
-        return [], []
+        return [], [], []
 
     headers = {
         "Authorization": f"Bearer {token}",
@@ -131,18 +134,22 @@ def _post_batch(cart_items: list, token: str) -> tuple[list, list]:
         )
     except requests.RequestException as e:
         # Network-level failure — mark all items as failed
+        _log.warning("CART batch of %d: request failed: %s", len(cart_items), e)
         return [], [
             {"upc": i["upc"], "quantity": i["quantity"], "error": str(e)}
             for i in cart_items
-        ]
+        ], []
+
+    _log.info("CART batch of %d: HTTP %s %s", len(cart_items),
+              response.status_code, response.text[:300])
 
     if response.ok:
         # Batch succeeded — all items accepted
-        return [i["upc"] for i in cart_items], []
+        return [i["upc"] for i in cart_items], [], []
 
     if response.status_code == 400:
         # Batch format may be unsupported — try one at a time
-        print("  ⚠ Batch cart post returned 400. Falling back to individual item posts...")
+        _log.warning("CART batch returned 400 — falling back to individual item posts")
         return _post_individually(cart_items, token)
 
     if response.status_code == 401:
@@ -151,7 +158,7 @@ def _post_batch(cart_items: list, token: str) -> tuple[list, list]:
             {"upc": i["upc"], "quantity": i["quantity"],
              "error": "Authorization error — please restart the app to re-authorize."}
             for i in cart_items
-        ]
+        ], []
 
     # Other error — mark all as failed with status detail
     error_msg = f"Kroger API error {response.status_code}"
@@ -165,10 +172,10 @@ def _post_batch(cart_items: list, token: str) -> tuple[list, list]:
     return [], [
         {"upc": i["upc"], "quantity": i["quantity"], "error": error_msg}
         for i in cart_items
-    ]
+    ], []
 
 
-def _post_individually(cart_items: list, token: str) -> tuple[list, list]:
+def _post_individually(cart_items: list, token: str) -> tuple[list, list, list]:
     """
     Fall back: post each item to the Kroger cart one at a time.
     Used when batch posting fails or is unsupported.
@@ -181,6 +188,7 @@ def _post_individually(cart_items: list, token: str) -> tuple[list, list]:
 
     succeeded_upcs = []
     failed_items = []
+    qty_dropped_upcs = []
 
     for cart_item in cart_items:
         upc = cart_item["upc"]
@@ -204,7 +212,11 @@ def _post_individually(cart_items: list, token: str) -> tuple[list, list]:
         if response.ok:
             succeeded_upcs.append(upc)
         elif response.status_code == 400:
-            # Try without quantity field (some Kroger API versions don't support it)
+            # Try without quantity field (some Kroger API versions don't support it).
+            # Kroger then adds exactly 1, so this is recorded as a quantity drop
+            # and surfaced on the summary screen rather than passing silently.
+            _log.warning("CART upc=%s qty=%s rejected (400): %s — retrying WITHOUT quantity (adds 1)",
+                         upc, quantity, response.text[:300])
             payload_no_qty = {"items": [{"upc": upc}]}
             try:
                 retry = requests.put(
@@ -215,18 +227,24 @@ def _post_individually(cart_items: list, token: str) -> tuple[list, list]:
                 )
                 if retry.ok:
                     succeeded_upcs.append(upc)
+                    if quantity != 1:
+                        qty_dropped_upcs.append(upc)
                 else:
                     error_msg = f"Error {retry.status_code}"
+                    _log.warning("CART upc=%s no-qty retry failed: HTTP %s %s",
+                                 upc, retry.status_code, retry.text[:300])
                     failed_items.append({"upc": upc, "quantity": quantity, "error": error_msg})
             except requests.RequestException as e:
                 failed_items.append({"upc": upc, "quantity": quantity, "error": str(e)})
         else:
             error_msg = f"Error {response.status_code}"
+            _log.warning("CART upc=%s qty=%s failed: HTTP %s %s",
+                         upc, quantity, response.status_code, response.text[:300])
             failed_items.append({"upc": upc, "quantity": quantity, "error": error_msg})
 
         time.sleep(CART_CALL_DELAY)
 
-    return succeeded_upcs, failed_items
+    return succeeded_upcs, failed_items, qty_dropped_upcs
 
 
 # ---------------------------------------------------------------------------
@@ -237,12 +255,14 @@ def _build_cart_result(
     confirmed_items: list,
     succeeded_upcs: list,
     failed_cart_items: list,
+    qty_dropped_upcs: list,
 ) -> dict:
     """
     Build the CartResult dict from raw API outcomes.
     Matches API results back to original confirmed items for display.
     """
     succeeded_upc_set = set(succeeded_upcs)
+    qty_dropped_set = set(qty_dropped_upcs)
     failed_upc_map = {f["upc"]: f["error"] for f in failed_cart_items}
 
     succeeded = []
@@ -261,12 +281,14 @@ def _build_cart_result(
         if upc in succeeded_upc_set:
             item_result["cart_status"] = "added"
             item_result["cart_error"]  = None
+            # Kroger accepted it only without a quantity, so it holds 1.
+            item_result["qty_dropped"] = upc in qty_dropped_set
             succeeded.append(item_result)
 
             # Add to estimated total
             price = primary.get("promo_price") or primary.get("price")
             if price:
-                quantity = max(1, round(item.get("quantity", 1)))
+                quantity = 1 if item_result["qty_dropped"] else max(1, round(item.get("quantity", 1)))
                 estimated_total += price * quantity
 
         else:
@@ -350,15 +372,18 @@ def post_to_cart(confirmed_items: list) -> dict:
     # Post in batches (handles lists larger than BATCH_SIZE)
     all_succeeded_upcs = []
     all_failed_items = []
+    all_qty_dropped = []
 
     for i in range(0, len(cart_items), BATCH_SIZE):
         batch = cart_items[i:i + BATCH_SIZE]
-        succeeded_upcs, failed = _post_batch(batch, token)
+        succeeded_upcs, failed, qty_dropped = _post_batch(batch, token)
         all_succeeded_upcs.extend(succeeded_upcs)
         all_failed_items.extend(failed)
+        all_qty_dropped.extend(qty_dropped)
 
     # Build result
-    result = _build_cart_result(confirmed_items, all_succeeded_upcs, all_failed_items)
+    result = _build_cart_result(confirmed_items, all_succeeded_upcs,
+                                all_failed_items, all_qty_dropped)
 
     print(f"Cart post complete: "
           f"{result['success_count']} added, "
@@ -391,6 +416,7 @@ def log_completed_session(
     new_preferences_count: int = 0,
     skipped_items: list | None = None,
     not_found_items: list | None = None,
+    raw_text: str = "",
 ) -> None:
     """
     Write a session summary to the rolling session log.
@@ -409,6 +435,48 @@ def log_completed_session(
         "new_preferences":  new_preferences_count,
         "estimated_total":  cart_result["estimated_total"],
     })
+    # Item-level trace, persisted so a bad order can be diagnosed afterwards
+    # (Streamlit Cloud's stdout log is gone after a container recycle). Never
+    # let a trace failure break the checkout flow.
+    try:
+        append_run_log(_build_run_trace(
+            cart_result, skipped_items or [], not_found_items or [], raw_text))
+    except Exception as e:
+        _log.warning("run_log write failed: %s", e)
+
+
+def _trace_row(item: dict, outcome: str) -> dict:
+    """One item's journey: parsed ask -> matched product -> what hit the cart."""
+    p = item.get("primary") or {}
+    return {
+        "item":         item.get("item_name"),
+        "outcome":      outcome,
+        "requested":    item.get("requested_quantity"),
+        "unit":         item.get("unit", ""),
+        "notes":        item.get("notes", ""),
+        "qty_default":  item.get("qty_default"),
+        "qty_sent":     max(1, round(item.get("quantity", 1))) if p else None,
+        "qty_in_cart":  (1 if item.get("qty_dropped") else max(1, round(item.get("quantity", 1))))
+                        if outcome == "added" else 0,
+        "qty_edited":   item.get("qty_user_edited", False),
+        "qty_dropped":  item.get("qty_dropped", False),
+        "swapped":      item.get("swapped", False),
+        "match_type":   item.get("match_type"),
+        "upc":          p.get("upc"),
+        "product":      p.get("product_name"),
+        "size":         p.get("size"),
+        "sold_by":      p.get("sold_by"),
+        "cart_error":   item.get("cart_error"),
+    }
+
+
+def _build_run_trace(cart_result: dict, skipped: list, not_found: list,
+                     raw_text: str) -> dict:
+    rows = [_trace_row(i, "added") for i in cart_result.get("succeeded", [])]
+    rows += [_trace_row(i, "cart_failed") for i in cart_result.get("failed", [])]
+    rows += [_trace_row(i, "skipped") for i in skipped]
+    rows += [_trace_row(i, "not_found") for i in not_found]
+    return {"raw_text": raw_text, "items": rows}
 
 
 # ---------------------------------------------------------------------------

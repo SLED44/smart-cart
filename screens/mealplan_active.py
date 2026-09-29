@@ -222,6 +222,7 @@ def _hand_off_to_smartcart(plan: dict, items: list[dict] | None = None):
     # matcher, which is where the unit artifacts (counts shown as lb/bunch) and
     # the recipe-title-next-to-each-ingredient clutter came from.
     st.session_state.raw_list = _items_to_text(items)
+    _log.info("handoff text -> home:\n%s", st.session_state.raw_list)
     st.session_state.meal_plan_handoff = True
 
     # Reset any leftover session state from a previous SmartCart run.
@@ -257,7 +258,12 @@ def _hand_off_to_smartcart(plan: dict, items: list[dict] | None = None):
 # e.g. garlic as unit "count" (the number is cloves), so the plain count would
 # read as whole heads — "12 garlic" → 12 bulbs. Re-attach the portion word so
 # the list parser collapses it to one item ("12 cloves garlic" → 1 head).
-_COUNT_PORTION = {"garlic": "cloves"}
+# Scallions come many to a bunch, so "4 scallion" must not become 4 bunches.
+_COUNT_PORTION = {
+    "garlic": "cloves",
+    "scallion": "stalks", "scallions": "stalks",
+    "green onion": "stalks", "green onions": "stalks",
+}
 
 
 def _items_to_text(items: list[dict]) -> str:

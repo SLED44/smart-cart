@@ -8,9 +8,12 @@ import cart_manager
 import kroger_auth
 import preference_store
 import product_matcher
+from applog import get_logger
 from sc_design import match_badge, product_card
 
 from screens._shared import go
+
+_log = get_logger(__name__)
 
 
 def render():
@@ -91,6 +94,8 @@ def render():
                 base_qty = float(smart)
                 st.session_state[qty_suggested] = True
         st.session_state[qty_key] = max(1.0, base_qty)
+        # The quantity the screen proposed, before any user edit.
+        st.session_state[f"qty_default_{idx}"] = st.session_state[qty_key]
 
     if current and not st.session_state.get(f"qty_locked_{idx}"):
         smart = product_matcher.coverage_quantity(item, current)
@@ -250,8 +255,22 @@ def _kroger_search_for_review(query: str) -> list:
 
 def _confirm_current(item: dict, idx: int, current: dict, quantity: float):
     """Confirm current product, optionally save preference, advance queue."""
-    confirmed_item = {**item, "primary": current, "quantity": quantity}
+    primary = item.get("primary") or {}
+    confirmed_item = {
+        **item, "primary": current, "quantity": quantity,
+        "qty_default":     st.session_state.get(f"qty_default_{idx}"),
+        "qty_user_edited": bool(st.session_state.get(f"qty_user_edited_{idx}")),
+        "swapped":         current.get("upc") != primary.get("upc"),
+    }
     st.session_state.confirmed_items.append(confirmed_item)
+    _log.info("REVIEW confirm %r: requested=%s matched_qty=%s default=%s -> qty=%s%s "
+              "-> %r (%s, soldBy=%s, upc=%s)%s",
+              item.get("item_name", "?"), item.get("requested_quantity"),
+              item.get("quantity"), confirmed_item["qty_default"], quantity,
+              " (user edited)" if confirmed_item["qty_user_edited"] else "",
+              current.get("product_name", "?"), current.get("size", ""),
+              current.get("sold_by", ""), current.get("upc", ""),
+              f" (swapped from {primary.get('product_name')!r})" if confirmed_item["swapped"] else "")
 
     if st.session_state.get(f"save_pref_{idx}", False):
         preference_store.save_preference(
@@ -281,6 +300,7 @@ def _confirm_current(item: dict, idx: int, current: dict, quantity: float):
 def _skip_current(item: dict, idx: int):
     """Skip current item, advance queue."""
     skipped_item = {**item}
+    _log.info("REVIEW skip %r [%s]", item.get("item_name", "?"), item.get("match_type", "?"))
     if item.get("match_type") == "Not Found":
         st.session_state.not_found_items.append(skipped_item)
     else:
@@ -330,6 +350,12 @@ def _post_cart_and_go_summary():
     auto_confirmed = st.session_state.auto_confirmed_items
 
     all_confirmed = manually_confirmed + auto_confirmed
+    for it in auto_confirmed:
+        p = it.get("primary") or {}
+        _log.info("AUTO confirm %r: requested=%s -> qty=%s %r (%s, soldBy=%s, upc=%s)",
+                  it.get("item_name", "?"), it.get("requested_quantity"),
+                  it.get("quantity"), p.get("product_name", "?"), p.get("size", ""),
+                  p.get("sold_by", ""), p.get("upc", ""))
 
     with st.spinner(f"Adding {len(all_confirmed)} items to your Kroger cart..."):
         result = cart_manager.post_to_cart(all_confirmed)
@@ -340,6 +366,8 @@ def _post_cart_and_go_summary():
         new_preferences_count=st.session_state.new_prefs_count,
         skipped_items=st.session_state.skipped_items,
         not_found_items=st.session_state.not_found_items,
+        raw_text=(st.session_state.get("parsed_result") or {}).get("raw_text", "")
+                 or st.session_state.get("raw_list", ""),
     )
 
     go("summary")

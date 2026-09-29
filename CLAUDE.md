@@ -180,14 +180,16 @@ Rough priority order. Pick from the top.
   `product_matcher.coverage_quantity(item, product)`, which returns None for
   anything the parser counted (quantity > 1). Fixed 2026-08-23; regression
   tests in `python3 product_matcher.py --test`.
-- **A rejected cart add can silently become quantity 1.**
-  `cart_manager._add_items_individually()` retries a 400 *without* the
-  `quantity` field (some Kroger API versions reject it) and counts the retry
-  as a success — Kroger then adds one. Found 2026-08-23 while tracing the
-  canned-goods quantity bug; it was not that bug's cause (this path would hit
-  every multi-quantity item, not just cans) and has never been observed
-  firing, but it turns a partial failure into a wrong cart with no warning.
-  Worth making the retry report a partial add so the summary screen shows it.
+- **A rejected cart add becomes quantity 1 — now flagged, not silent.**
+  `cart_manager._post_individually()` retries a 400 *without* the `quantity`
+  field (some Kroger API versions reject it); Kroger then adds exactly one.
+  Since 2026-09-28 that item is marked `qty_dropped`, the WARNING log line
+  carries Kroger's 400 body, and the summary screen lists it so the user fixes
+  the amount in the City Market app. Suspected (unproven — no logs survived)
+  cause of 4 carrots arriving as 1 on 2026-09-27: loose carrots (PLU 4562) are
+  Kroger `soldBy: WEIGHT`; if Kroger rejects a quantity on weight-sold items,
+  this path is exactly what fires. Check `run_log` after the next run with a
+  weight-sold item.
 - **Cook times are minutes in the data and hours on screen.** Slow-cooker
   recipes legitimately carry 400-500 `ready_in_minutes` (10 in the library do),
   and "500 min" reads as a bug. Every screen renders time through
@@ -201,6 +203,9 @@ Rough priority order. Pick from the top.
   - `:root` CSS variables **do** propagate fine, as do `oklch()` colors and `.sc-*` class rules. Earlier notes here claimed otherwise; that was a misdiagnosis of the `<`-in-comment bug.
   - `st.html`'s sanitizer silently strips inline `<svg>` — SVG renders as blank space, no error. Build art from plain styled `<div>`s instead (see `sc_design.recipe_tile_html`). Inline SVG *does* work inside `st.components.v1.html` iframes (not sanitized) — that's where `sc_design.recipe_art` is still used (cook-pane).
   - Debugging tip: `st.html` sends style-only payloads to Streamlit's *event* container, not the main tree, so don't panic when the `<style>` isn't where you expect. To check whether a sheet actually landed, look for one of its selectors in `document.styleSheets` rather than for the tag.
+
+- **Diagnosing a bad order: read `run_log` first.** Every cart post writes an item-level trace to kv key `run_log` (last 10 runs): the raw list text, and per item the requested qty → review default → qty sent → qty in cart, matched UPC/product/size, Kroger `sold_by` (UNIT vs WEIGHT), edits, swaps, and `qty_dropped`. Query: `select value->-1 from kv where key='run_log'`. Streamlit Cloud stdout (`STAGE`/`PARSE`/`MATCH`/`REVIEW`/`AUTO`/`CART` lines) is lost on container recycle, so don't rely on it after the fact.
+- **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners
 

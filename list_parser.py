@@ -97,11 +97,14 @@ Quantity rules — read carefully:
 - For PORTIONS of a package — where the number counts pieces that come many
   to one package/bunch/head, so you still only buy ONE: strips/slices/rashers
   (bacon), slices (bread, cheese), cloves (garlic), sprigs (herbs), stalks or
-  ribs (celery), leaves. Set quantity = 1, unit = "", and put the portion
-  count in notes. Never turn "2 strips" into 2 packages.
+  ribs (celery), leaves, and green onions / scallions (sold as one bunch of
+  6-8). Set quantity = 1, unit = "", and put the portion count in notes.
+  Never turn "2 strips" into 2 packages.
   Example: "2 strips of bacon" -> item_name: "Bacon", quantity: 1, unit: "", notes: "2 strips"
   Example: "3 cloves garlic" -> item_name: "Garlic", quantity: 1, unit: "", notes: "3 cloves"
   Example: "4 slices bread" -> item_name: "Bread", quantity: 1, unit: "", notes: "4 slices"
+  Example: "4 green onions" -> item_name: "Green Onion", quantity: 1, unit: "", notes: "4 green onions"
+  Only an explicit bunch count buys more than one: "2 bunches scallions" -> quantity: 2, unit: "bunch"
 - For items sold by COUNT — whole pieces you actually buy individually (eggs,
   apples, bananas, salmon fillets, heads of lettuce, avocados):
   quantity = the count number, unit = "count"
@@ -219,6 +222,11 @@ def parse_grocery_list(raw_text: str) -> dict:
 
     _log.info("parse_grocery_list: %d char input -> %d item(s)",
               len(raw_text or ""), len(enriched_items))
+    # The exact text the model saw — the first thing to check when a parsed
+    # quantity looks wrong.
+    _log.info("PARSE input:\n%s", raw_text)
+    for w in warnings:
+        _log.info("PARSE warning: %s", w)
     log_items(_log, "list_parser.parsed", enriched_items)
 
     return {

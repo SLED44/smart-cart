@@ -49,6 +49,17 @@ def render():
                 qty_str = f" ×{qty}" if qty > 1 else ""
                 st.write(f"• **{item['item_name']}** → {brand} {name} {size}{price_str}{qty_str}")
 
+    dropped = [i for i in result["succeeded"] if i.get("qty_dropped")]
+    if dropped:
+        st.divider()
+        st.warning(
+            "Kroger only accepted these with a quantity of **1** — "
+            "set the right amount in the City Market app:\n\n" + "\n".join(
+                f"- **{i['item_name']}**: wanted {max(1, round(i.get('quantity', 1)))}, "
+                f"cart has 1 ({(i.get('primary') or {}).get('product_name', '')})"
+                for i in dropped)
+        )
+
     if result["failure_count"] > 0:
         st.divider()
         st.subheader(f"⚠ {result['failure_count']} Item(s) Failed to Add")

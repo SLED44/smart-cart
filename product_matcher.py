@@ -256,6 +256,11 @@ def _normalise_kroger_product(raw: dict) -> dict:
     categories = raw.get("categories", [])
     category = categories[0] if categories else ""
 
+    # How Kroger sells it: "UNIT" (each/package) or "WEIGHT" (loose produce,
+    # deli). For WEIGHT items a cart quantity is not a piece count, so this is
+    # carried through to the logs and run trace.
+    sold_by = (items[0].get("soldBy") or "") if items else ""
+
     return {
         "upc":          upc,
         "product_name": description,
@@ -267,6 +272,7 @@ def _normalise_kroger_product(raw: dict) -> dict:
         "in_stock":     in_stock,
         "image_url":    image_url,
         "category":     category,
+        "sold_by":      sold_by,
     }
 
 
@@ -507,6 +513,9 @@ def _match_single_item(
     saved_pref = preferences.get(item_key)
 
     result = {**item}  # Copy all original item fields
+    # Parser/aggregator quantity before any pack-size adjustment — kept so the
+    # run trace can show where a quantity changed.
+    result["requested_quantity"] = item.get("quantity", 1)
 
     # -------------------------------------------------------------------
     # Case 1: Saved preference exists — look up by UPC
@@ -699,9 +708,11 @@ def match_items(parsed_items: list) -> list:
     # Per-item match detail (helps trace where a quantity/unit goes wrong).
     for m in matched:
         prod = m.get("primary") or {}
-        _log.info("MATCH %r: qty=%s %s -> %r (%s) [%s]",
-                  m.get("item_name", "?"), m.get("quantity"), m.get("unit", ""),
+        _log.info("MATCH %r: requested=%s %s notes=%r -> qty=%s %r (%s, soldBy=%s, upc=%s) [%s]",
+                  m.get("item_name", "?"), m.get("requested_quantity"),
+                  m.get("unit", ""), m.get("notes", ""), m.get("quantity"),
                   prod.get("product_name", "(none)"), prod.get("size", ""),
+                  prod.get("sold_by", ""), prod.get("upc", ""),
                   m.get("match_type", "?"))
 
     # Single summary print (per-item logging from worker threads is noisy)
