@@ -1071,6 +1071,104 @@ def protein_target_tests(t: "_T") -> None:
         _libmod.filter, _libmod.get, _evt.feedback_signals = orig
 
 
+def _beef_broccoli() -> dict:
+    """Trimmed copy of the library's gen_chinese_beef_broccoli — the recipe
+    whose rice step lit up all three sauces ("saucepan")."""
+    names = ["flank steak", "cornstarch", "soy sauce", "low-sodium soy sauce",
+             "oyster sauce", "chicken broth", "brown sugar", "toasted sesame oil",
+             "cornstarch", "broccoli crowns", "garlic", "fresh ginger",
+             "vegetable oil", "jasmine rice"]
+    steps = [
+        "Start the rice first: rinse 1.5 cups jasmine rice, cook in a rice "
+        "cooker or saucepan (1.5 cups rice : 2.25 cups water, simmer covered "
+        "12 min, rest 10).",
+        "Toss the sliced flank steak with 1 tbsp cornstarch and 1 tbsp soy sauce.",
+        "Stir the sauce together: 3 tbsp low-sodium soy, 2 tbsp oyster sauce, "
+        "3/4 cup chicken broth, 1 tbsp brown sugar, 1 tsp sesame oil.",
+        "Microwave the broccoli florets with 2 tbsp water.",
+        "Lower to medium-high, add remaining oil, then garlic and ginger.",
+        "Pour in the sauce and simmer ~1 minute.",
+    ]
+    return {"id": "bb", "ingredients": [{"name": n} for n in names],
+            "instructions": [{"step_number": i + 1, "text": t}
+                             for i, t in enumerate(steps)]}
+
+
+def step_tag_tests(t: "_T") -> None:
+    """Step → ingredient highlighting (mealplan/step_tags). Network-free: the
+    Claude path is exercised through parse_response / stored maps only."""
+    from mealplan import step_tags as stg
+
+    def names(recipe, mapping, step):
+        return [recipe["ingredients"][i]["name"] for i in mapping.get(str(step), [])]
+
+    @t.case("keyword fallback: 'saucepan' doesn't light any sauce")
+    def _():
+        r = _beef_broccoli()
+        assert names(r, stg.keyword_map(r), 1) == ["jasmine rice"], names(r, stg.keyword_map(r), 1)
+
+    @t.case("keyword fallback: matches whole words only ('foil' isn't oil)")
+    def _():
+        r = {"ingredients": [{"name": "oil"}, {"name": "bread"}],
+             "instructions": [{"text": "Line a pan with foil and scatter breadcrumbs."}]}
+        assert stg.keyword_map(r) == {}
+
+    @t.case("keyword fallback: a distinctive word matches ('chicken' -> chicken breasts)")
+    def _():
+        r = {"ingredients": [{"name": "chicken breasts"}, {"name": "ground beef (85/15)"}],
+             "instructions": [{"text": "Cut chicken into strips."},
+                              {"text": "Brown the beef."}]}
+        m = stg.keyword_map(r)
+        assert m == {"1": [0], "2": [1]}, m
+
+    @t.case("keyword fallback: the longer phrase wins ('garlic powder' isn't garlic)")
+    def _():
+        r = {"ingredients": [{"name": "garlic"}, {"name": "garlic powder"}],
+             "instructions": [{"text": "Season with garlic powder."}]}
+        assert stg.keyword_map(r) == {"1": [1]}
+
+    @t.case("keyword fallback: a generic word alone never matches ('the sauce')")
+    def _():
+        r = _beef_broccoli()
+        assert names(r, stg.keyword_map(r), 6) == []
+
+    @t.case("parse_response keeps only real steps and real ingredient rows")
+    def _():
+        text = ('Here you go:\n```json\n{"steps": {"1": [13, 13, 99, -1, true], '
+                '"2": [0, 1, 2], "7": [3], "x": [1], "3": []}}\n```')
+        assert stg.parse_response(text, n_steps=6, n_ings=14) == {"1": [13], "2": [0, 1, 2]}
+
+    @t.case("parse_response rejects a reply with no steps object")
+    def _():
+        try:
+            stg.parse_response("sorry, I can't", n_steps=3, n_ings=3)
+        except stg.StepTagError:
+            return
+        raise AssertionError("expected StepTagError")
+
+    @t.case("a stored map is used until the recipe text changes")
+    def _():
+        r = _beef_broccoli()
+        r[stg.FIELD] = {"fp": stg.fingerprint(r), "map": {"1": [13]}}
+        assert stg.ensure(r, allow_llm=False) == {"1": [13]}
+        r["instructions"][0]["text"] += " Fluff with a fork."
+        assert stg.stored_map(r) is None, "edited recipe must invalidate its tags"
+
+    @t.case("the prompt numbers ingredients by index and includes groups")
+    def _():
+        r = _beef_broccoli()
+        r["ingredients"][1]["group"] = "Beef"
+        p = stg.build_prompt(r)
+        assert "1: cornstarch | group: Beef" in p and "13: jasmine rice" in p
+        assert "1. Start the rice first" in p
+
+    @t.case("cook pane renders the supplied step map")
+    def _():
+        from screens._cook_pane import build_cook_pane
+        html_doc = build_cook_pane(_beef_broccoli(), 1.0, step_map={"1": [13]})
+        assert 'var HL = {"1": [13]};' in html_doc
+
+
 def main() -> int:
     t = _T()
     rules_tests(t)
@@ -1081,6 +1179,7 @@ def main() -> int:
     equipment_target_tests(t)
     time_format_tests(t)
     protein_target_tests(t)
+    step_tag_tests(t)
     return t.summary()
 
 

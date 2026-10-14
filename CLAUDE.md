@@ -237,6 +237,7 @@ Rough priority order. Pick from the top.
   when a cut runs dry the screens say so and point at Paste recipe. Target
   matches ignore the slow-cooker toggle (both shoulder recipes are
   slow-cooker). Tests: `protein_target_tests` in `mealplan/_tests.py`.
+- **Step → ingredient highlighting is tagged by Claude, once per recipe.** The cook pane lights a step's ingredients from `recipe["step_ingredients"]` (`{"fp": ..., "map": {"<step>": [ingredient indices]}}`), written by `mealplan/step_tags.py` the first time a recipe is opened in cooking mode (one Haiku call, spinner). `fp` hashes the ingredient lines + step texts, so editing a recipe re-tags it on the next open. Don't go back to text matching as the primary source: the old last-word substring matcher lit all three sauces on Beef & Broccoli's rice step ("sauce**pan**") and never lit ~30% of ingredients. `keyword_map` (whole-word, plural-tolerant) is only the fallback when Claude is unreachable. Tag the whole library ahead of time with `python3 -m mealplan.step_tags --backfill`; inspect one with `--show <recipe_id>`. Tests: `step_tag_tests` in `mealplan/_tests.py`. Added 2026-10-14.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners
@@ -250,6 +251,9 @@ python3 -m mealplan._tests && python3 auth.py --test
 
 # Pull a fresh local backup from Supabase
 python3 -c "import json, preference_store; print(json.dumps(preference_store.export_data(), indent=2))" > backup_$(date +%Y%m%d).json
+
+# Tag every recipe's steps -> ingredients (cook-pane highlighting); re-runnable
+python3 -m mealplan.step_tags --backfill
 
 # Re-auth Kroger locally (rarely needed — hosted flow self-heals)
 python3 kroger_auth.py --reauth
