@@ -219,8 +219,11 @@ def main():
     # OAuth handler so a Kroger round-trip lands back on a logged-in app.
     if auth.restore_session() and st.session_state.screen == "login":
         # A restored session starts on "login" (that's the fresh-session
-        # default), which routes nowhere. Land it where a fresh sign-in lands.
-        st.session_state.screen = DEFAULT_SCREEN
+        # default), which routes nowhere. Land it where a fresh sign-in lands
+        # — or on the grocery home when a Kroger round-trip just finished
+        # (the callback below ran a run earlier, before the browser reported
+        # the cookie, so its own go("home") was skipped).
+        st.session_state.screen = "home" if st.session_state.kroger_auth_msg else DEFAULT_SCREEN
     auth.sync_cookie()
 
     # Finish any in-flight Kroger OAuth round-trip before rendering anything.

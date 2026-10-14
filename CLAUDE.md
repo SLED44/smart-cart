@@ -85,13 +85,25 @@ Streamlit Cloud idle-restart. `auth.py` backs it with a first-party cookie
 secret in the cookie, nothing stored server-side (a paused Supabase can't lock
 you out), and rotating `APP_PASSWORD` invalidates every outstanding token.
 
-- **Read** via `st.context.cookies` (hence `streamlit>=1.42` in requirements).
-- **Write** via a 1px `st.iframe` (falls back to `st.components.v1.html`) that
-  sets `document.cookie` on the parent — those iframes run same-origin, so the
-  cookie lands on the app's own origin. Writes are queued in `session_state`
-  first (`auth.start_session()` / `end_session()`) and flushed by
-  `auth.sync_cookie()` on the *next* run, because the `st.rerun()` that
-  navigation triggers would otherwise discard the element.
+- **Read and write both happen in the browser**, via a zero-height
+  `st.components.v2` "bridge" (hence `streamlit>=1.51`). Its JS writes any
+  queued cookie change to `document.cookie`, then reports the cookie's value
+  back to Python, which triggers one rerun. Until 2026-10-14 the read used
+  `st.context.cookies` only — that works locally but is **always empty on
+  Streamlit Community Cloud** (reportedly its proxy filters cookies off the WebSocket
+  handshake), so the login cookie sat in the browser unread and every
+  refresh asked for the password. `st.context` is still checked first (local
+  dev restores instantly). Simulate Cloud locally by making
+  `auth._cookie_from_server()` return `""`.
+- Writes are queued in `session_state` (`auth.start_session()` /
+  `end_session()`) and flushed by `auth.sync_cookie()` on the *next* run,
+  because the `st.rerun()` that navigation triggers would otherwise discard
+  the element.
+- Each page load logs one `AUTH restore: server_cookie=… browser_cookie=…
+  valid=…` line — the first thing to check if logouts come back.
+- **iPad/iPhone (any browser — all are WebKit):** script-written cookies are
+  deleted after 7 days without a visit (ITP). A week away = one password
+  prompt; unavoidable for a cookie set from JS.
 - The cookie is consulted **once per Streamlit session**, so signing out isn't
   undone by the stale value still sitting in this connection's headers.
 - Sign out lives in the meal planner's **⚙ Settings + admin** expander.
@@ -196,6 +208,14 @@ Rough priority order. Pick from the top.
   `recipe_units.format_minutes()` → "8 hr 20 min" (or "8h 20m" on the compact
   home tiles). Don't format it inline again.
 - **Kroger API rate limits aren't published precisely.** 5 parallel workers is conservative. If you see 429s, drop `MATCH_WORKERS` and `SCAN_WORKERS`.
+- **Streamlit Cloud sleeps the app after 12 h without traffic** — a cold wake
+  is the "Yes, get this app back up" page and ~30 s+. `.github/workflows/streamlit-keepalive.yml`
+  opens the app in headless Chromium every 6 h (`scripts/streamlit_keepalive.py`),
+  clicks the wake button if needed, and waits for the login screen. It never
+  logs in. curl pings and commits don't count as traffic. Unsupported by
+  Streamlit, so if they change the sleep page the job fails (GitHub emails;
+  screenshot uploaded as a run artifact) — update `WAKE_BUTTON` /
+  `APP_READY_TEXT` in the script.
 - **Supabase free-tier pausing can't be reliably prevented — so the keepalive self-heals instead.** Learned July 2026 in two stages: (1) read-only GET pings don't count as "sufficient activity"; (2) even a daily *verified write* didn't stop the 2026-07-08 pause — Supabase paused the project one minute after a successful write, because once their scanner flags a project the pause proceeds anyway. `.github/workflows/keepalive.yml` (v3) runs daily (09:23 UTC), upserts kv key `keepalive:last_ping` and verifies it via a per-run nonce; if the write fails because the project is paused, it **auto-restores** via the Supabase Management API, waits for `ACTIVE_HEALTHY`, and retries. It also re-enables itself via the GitHub API to reset GitHub's 60-day scheduled-workflow disable timer. GitHub only emails a failure when auto-restore itself fails — that's when a human needs https://supabase.com/dashboard/project/odwkznptayhobwjgegin. Unpausing is **free** within 90 days of a pause (never a paid unlock); past 90 days the project is unrecoverable (data export only). Required repo secrets: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ACCESS_TOKEN` (personal access token for the restore path).
 - **Streamlit CSS gotchas** to remember — all of them are the sanitizer, and all of them fail *silently*:
   - **A raw `<` anywhere in a CSS payload kills the whole `<style>` element.** DOMPurify's `SAFE_FOR_XML` removes any element whose text has `<` followed by `/`, `!`, or a word char. A `<style>` inside a `/* comment */` is enough. This made `style.css` completely inert from May 2026 to 2026-07-23. `main.py`'s `_css_safe()` rewrites `<` → `\3c ` to immunize it. Size, `@media`, and `oklch()` are *not* problems — an 11KB filler sheet loads fine.
@@ -239,4 +259,4 @@ python3 kroger_auth.py --reauth
 ```
 
 ---
-*Last update: 2026-09-28 — "use up this protein" 🎯 slot on the meal planner (cut-level matching, library only). Previous: 2026-08-22 — persistent login (`auth.py` signed cookie; sign-out in meal-planner settings) and clickable meal tiles on the meal-planner home (each meal opens straight into cooking mode). Previous: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*
+*Last update: 2026-10-14 — persistent login actually persists on Streamlit Cloud (browser-side cookie bridge; `st.context.cookies` is empty there) + Streamlit keep-alive workflow. Previous: 2026-09-28 — "use up this protein" 🎯 slot on the meal planner (cut-level matching, library only). Previous: 2026-08-22 — persistent login (`auth.py` signed cookie; sign-out in meal-planner settings) and clickable meal tiles on the meal-planner home (each meal opens straight into cooking mode). Previous: 2026-07-23 — fixed `style.css` never loading (DOMPurify dropped it over a literal `<style>` in a comment); corrected the Design-system notes that had blamed `:root` inheritance. Previous: 2026-05-16 — Claude Design system refresh (pastel stat tiles, savings hero, refreshed product cards, voice copy pass). Previous: 2026-05-15 migration from local-only → Streamlit Cloud + Supabase. Single-user household tool. Not for distribution.*

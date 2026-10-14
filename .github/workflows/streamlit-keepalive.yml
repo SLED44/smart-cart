@@ -1,0 +1,62 @@
+name: Streamlit keep-alive
+
+# Streamlit Community Cloud puts a free app to sleep after 12 hours without
+# traffic, and only a real browser visit counts (curl pings and commits
+# don't reliably). So every 6 hours this opens the app in headless Chromium,
+# clicks "Yes, get this app back up" if it's already asleep, and waits for
+# the login screen. It never logs in — no password lives in GitHub.
+#
+# Not a supported Streamlit feature: if they change the sleep page, this
+# fails loudly (GitHub emails the repo owner) with a screenshot attached.
+#
+# Separate from keepalive.yml, which keeps the Supabase database awake.
+# Run history: github.com/SLED44/smart-cart/actions
+
+on:
+  schedule:
+    # Every 6 hours at :41 — off the hour, because GitHub delays or drops
+    # crons scheduled at :00 during peak congestion.
+    - cron: "41 */6 * * *"
+  workflow_dispatch:  # allow manual runs from the Actions tab
+
+permissions:
+  actions: write  # needed by the self re-enable step
+  contents: read
+
+jobs:
+  visit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Playwright + Chromium
+        run: |
+          pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Visit the app (wake it if asleep)
+        run: python scripts/streamlit_keepalive.py https://sled44-smartcart.streamlit.app/
+
+      - name: Upload screenshot on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: keepalive-failure
+          path: keepalive-failure.png
+          if-no-files-found: ignore
+
+      # GitHub disables scheduled workflows after 60 days without repo
+      # activity. Re-enabling via the API resets that timer.
+      - name: Reset GitHub's 60-day scheduled-workflow disable timer
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --method PUT \
+            "repos/${{ github.repository }}/actions/workflows/streamlit-keepalive.yml/enable"
+          echo "✓ workflow re-enabled (60-day timer reset)"
