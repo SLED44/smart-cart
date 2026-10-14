@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 import streamlit as st
 import streamlit.components.v1 as components
 
-from mealplan import library
+from mealplan import library, step_tags
 from mealplan.event_log import (
     EVT_RECIPE_CHANGED,
     EVT_RECIPE_COOKED,
@@ -46,6 +46,7 @@ _RETURN_KEY = "mealplan_cook_return"
 _NOTES_EDIT_KEY = "mealplan_cook_notes_edit_open"
 _DELETE_CONFIRM_KEY = "mealplan_cook_never_again_confirm"
 _FLASH_KEY = "mealplan_cook_flash"
+_STEPTAG_FAILED_KEY = "mealplan_cook_steptag_failed"
 
 
 def render():
@@ -136,10 +137,29 @@ def _render_cook_body(rid: str, recipe: dict, scale: float):
         st.caption("No ingredients or steps recorded for this recipe.")
         return
     components.html(
-        build_cook_pane(recipe, scale),
+        build_cook_pane(recipe, scale, step_map=_step_map(recipe)),
         height=PANE_HEIGHT + 8,  # +8 so the cards' shadow isn't clipped
         scrolling=False,
     )
+
+
+def _step_map(recipe: dict) -> dict:
+    """Step → ingredient map for the highlight. The first open of a recipe asks
+    Claude once and saves the answer; if that fails we use the keyword
+    fallback and don't retry for the rest of this session (every click on
+    this screen reruns it)."""
+    cached = step_tags.stored_map(recipe)
+    if cached is not None:
+        return cached
+    failed = st.session_state.setdefault(_STEPTAG_FAILED_KEY, set())
+    fp = step_tags.fingerprint(recipe)
+    if fp in failed:
+        return step_tags.keyword_map(recipe)
+    with st.spinner("Matching ingredients to steps…"):
+        mapping = step_tags.ensure(recipe)
+    if step_tags.stored_map(recipe) is None:
+        failed.add(fp)
+    return mapping
 
 
 # ---------------------------------------------------------------------------

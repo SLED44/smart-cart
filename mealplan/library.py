@@ -238,6 +238,17 @@ def set_status(recipe_id: str, status: str) -> bool:
     return True
 
 
+def set_field(recipe_id: str, field: str, value) -> bool:
+    """Set one derived field (e.g. ``step_ingredients``) without touching the
+    rest of the record. Returns False if the recipe is missing."""
+    library = get_all()
+    if recipe_id not in library:
+        return False
+    library[recipe_id][field] = value
+    _put_all(library)
+    return True
+
+
 def set_rating(recipe_id: str, stars: int | None) -> bool:
     """Set (1-5) or clear (None) a recipe's star rating. Stamps rated_at.
     Returns False if the recipe is missing or stars is out of range."""

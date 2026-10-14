@@ -25,26 +25,11 @@ from __future__ import annotations
 import html
 import json
 
+from mealplan import step_tags
 from sc_design import recipe_art
 from recipe_units import format_minutes
 
 PANE_HEIGHT = 740  # iframe height; header + two columns that scroll inside it.
-
-# Generic words too weak to anchor a step→ingredient highlight (mirrors the
-# tokenizer in mealplan_cook so highlighting matches the rest of the app).
-_HIGHLIGHT_STOP = {"oil", "salt", "water", "sugar", "pepper", "butter", "broth"}
-
-
-def _step_uses_ingredient(step_text: str, name: str) -> bool:
-    name = (name or "").lower().strip()
-    if not name:
-        return False
-    text = step_text.lower()
-    if name in text:
-        return True
-    head = name.split()[-1] if name.split() else ""
-    return len(head) >= 4 and head not in _HIGHLIGHT_STOP and head in text
-
 
 def _line_to_html(line: str) -> str:
     """Convert a format_ingredient_line() result to safe HTML, honoring its
@@ -58,8 +43,13 @@ def _line_to_html(line: str) -> str:
     return html.escape(line)
 
 
-def build_cook_pane(recipe: dict, scale: float, height: int = PANE_HEIGHT) -> str:
-    """Return a self-contained HTML document for the cooking pane iframe."""
+def build_cook_pane(recipe: dict, scale: float, height: int = PANE_HEIGHT,
+                    step_map: dict | None = None) -> str:
+    """Return a self-contained HTML document for the cooking pane iframe.
+
+    ``step_map`` is ``{"<step number>": [ingredient indices]}`` from
+    ``mealplan.step_tags.ensure``; when omitted, the stored map (or the
+    keyword fallback) is used without calling Claude."""
     from screens import _recipe_view  # local import avoids a cycle at module load
 
     rid = recipe.get("id", "r")
@@ -71,15 +61,11 @@ def build_cook_pane(recipe: dict, scale: float, height: int = PANE_HEIGHT) -> st
     for i, ing in enumerate(ings):
         groups.setdefault((ing.get("group") or "").strip(), []).append((i, ing))
 
-    # Precompute the step → highlighted-ingredient-index map in Python (keeps
-    # the tokenizer identical across the app; JS just toggles classes).
-    highlight = {}
-    for s_idx, step in enumerate(steps, start=1):
-        text = step.get("text", "")
-        hits = [i for i, ing in enumerate(ings)
-                if _step_uses_ingredient(text, ing.get("name", ""))]
-        if hits:
-            highlight[str(s_idx)] = hits
+    # Step → ingredient-index map, computed in Python (see mealplan/step_tags);
+    # the JS below just toggles classes.
+    if step_map is None:
+        step_map = step_tags.ensure(recipe, allow_llm=False)
+    highlight = step_map
 
     # ---- Ingredient column markup -----------------------------------------
     ing_rows = []
