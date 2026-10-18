@@ -751,6 +751,58 @@ def grocery_addon_tests(t: _T):
         assert item["category"] == "Produce" and item["source"] == "meal_plan"
 
 
+def recipe_context_tests(t: _T):
+    from mealplan import grocery
+    from sc_design import recipe_context_card
+
+    class _Lib:
+        def __init__(self, recipes): self._r = {r["id"]: r for r in recipes}
+        def get(self, rid): return self._r.get(rid)
+
+    def ing(name, original):
+        return {"name": name, "unit": "", "original_text": original, "amount": 1}
+
+    lib = _Lib([
+        {"id": "a", "title": "Beef & Broccoli", "ingredients": [
+            ing("garlic", "3 garlic cloves, minced"),
+            ing("garlic", "2 cloves garlic, for the sauce"),
+            ing("green onions", "4 green onions, sliced"),
+        ]},
+        {"id": "b", "title": "Chili", "ingredients": [
+            ing("garlic", "▢ 4 cloves garlic"),
+            ing("tomatoes (canned)", "1 can diced tomatoes"),
+        ]},
+    ])
+
+    @t.case("context_key ignores case, plurals, parens, prep and portion words")
+    def _():
+        k = grocery.context_key
+        assert k("Cloves Garlic") == k("garlic") == "garlic"
+        assert k("green onion") == k("Green Onions")
+        assert k("tomatoes (canned)") == k("Tomato")
+        assert k("fresh parsley") == k("parsley")
+        # Parser output seen in run_log vs. the library's ingredient names.
+        assert k("Canned Cannellini Bean") == k("cannellini beans (15 oz)")
+        assert k("Shredded Carrot") == k("carrots, shredded")
+        assert k("bell pepper") != k("pepper")
+
+    @t.case("recipe_context nests each recipe's own lines under its title")
+    def _():
+        ctx = grocery.recipe_context(["a", "b"], library=lib)
+        garlic = ctx[grocery.context_key("garlic")]
+        assert [e["recipe"] for e in garlic] == ["Beef & Broccoli", "Chili"], garlic
+        assert garlic[0]["lines"] == ["3 garlic cloves, minced",
+                                      "2 cloves garlic, for the sauce"]
+        assert garlic[1]["lines"] == ["4 cloves garlic"]   # bullet stripped
+        assert len(ctx[grocery.context_key("green onions")]) == 1
+
+    @t.case("recipe_context_card escapes text and is empty with no entries")
+    def _():
+        html = recipe_context_card([{"recipe": "Mac & <Cheese>", "lines": ["1 cup milk"]}])
+        assert "Mac &amp; &lt;Cheese&gt;" in html and "1 cup milk" in html
+        assert recipe_context_card([]) == ""
+
+
 # ---------------------------------------------------------------------------
 # Swap matching tests (mealplan/swap.py)
 # ---------------------------------------------------------------------------
@@ -1185,6 +1237,7 @@ def main() -> int:
     planner_tests(t)
     recipe_view_tests(t)
     grocery_addon_tests(t)
+    recipe_context_tests(t)
     swap_tests(t)
     equipment_target_tests(t)
     time_format_tests(t)

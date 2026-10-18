@@ -7,6 +7,8 @@ grocery list.
 Public surface:
     aggregate_grocery_list(recipe_ids, household_size, library=None)
         -> list[Item]
+    recipe_context(recipe_ids, library=None)
+        -> {context_key: [{"recipe", "lines"}]}  # review-screen provenance
     AISLE_MAP                # Spoonacular aisle -> SmartCart category
 
 The returned Item dicts are byte-compatible with what list_parser produces,
@@ -375,3 +377,76 @@ def build_parsed_result(items: list[dict]) -> dict:
         "item_count":     len(items),
         "parse_warnings": [],
     }
+
+
+# ---------------------------------------------------------------------------
+# Recipe context for the review screen
+# ---------------------------------------------------------------------------
+# The hand-off re-renders the list as plain text and list_parser re-parses it,
+# so by the review screen an item no longer knows which recipe(s) asked for it.
+# recipe_context() builds a side lookup — loose ingredient key → the recipe
+# lines that called for it — which the hand-off stashes in session_state and
+# the review screen consults by item name. Best-effort by design: an item the
+# parser renamed past recognition, or one the user edited, simply shows no
+# context.
+
+# Prep/size words list_parser tends to drop ("fresh parsley" → "parsley").
+_CONTEXT_FILLER = {
+    "fresh", "freshly", "chopped", "minced", "diced", "sliced", "grated",
+    "shredded", "large", "medium", "small", "whole", "clove", "cloves",
+    "stalk", "stalks", "bunch", "bunches", "head", "heads", "of", "canned",
+}
+
+
+def _singular(word: str) -> str:
+    if len(word) > 4 and word.endswith("ies"):
+        return word[:-3] + "y"
+    if len(word) > 4 and word.endswith("oes"):
+        return word[:-2]
+    if len(word) > 3 and word.endswith("s") and not word.endswith("ss"):
+        return word[:-1]
+    return word
+
+
+def context_key(name: str) -> str:
+    """Loose match key: case, parentheses, plurals, word order and prep words
+    ignored. "Cloves Garlic" and "garlic" → "garlic"; "Green Onions" and
+    "green onion" → "green onion"."""
+    words = re.findall(r"[a-z0-9%]+", canonicalize_name(name))
+    kept = [_singular(w) for w in words if w not in _CONTEXT_FILLER]
+    return " ".join(sorted(kept or [_singular(w) for w in words]))
+
+
+def recipe_context(
+    recipe_ids: list[str],
+    library=None,
+) -> dict[str, list[dict]]:
+    """Map context_key(ingredient name) → the recipe lines that use it:
+
+        {"garlic": [{"recipe": "Beef & Broccoli",
+                     "lines": ["3 garlic cloves, minced"]}, ...]}
+
+    One entry per recipe, in plan order; a recipe that lists the ingredient
+    twice (marinade + sauce) gets both lines. Lines are the recipe's verbatim
+    original_text, unscaled — the shopping quantity is shown elsewhere.
+    """
+    lib = library if library is not None else _library
+    out: dict[str, list[dict]] = {}
+    for rid in recipe_ids:
+        recipe = lib.get(rid) if hasattr(lib, "get") else lib.get_all().get(rid)
+        if not recipe:
+            continue
+        title = recipe.get("title", rid)
+        for ing in (recipe.get("ingredients") or []):
+            key = context_key(ing.get("name") or "")
+            if not key:
+                continue
+            line = (ing.get("original_text") or ing.get("name") or "").strip()
+            line = line.lstrip("•-*▢□● ").strip()
+            entries = out.setdefault(key, [])
+            entry = next((e for e in entries if e["recipe"] == title), None)
+            if entry is None:
+                entries.append({"recipe": title, "lines": [line]})
+            elif line not in entry["lines"]:
+                entry["lines"].append(line)
+    return out

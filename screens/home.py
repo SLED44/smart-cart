@@ -181,7 +181,9 @@ def render():
         st.session_state.combined_items = items
         log_items(_log, "home.combined(+staples)", items)
         # Meal-plan load has been consumed; don't show the banner after parse.
-        st.session_state.pop("meal_plan_handoff", None)
+        # Recipe context only belongs to a list that came from the meal plan.
+        if not st.session_state.pop("meal_plan_handoff", None):
+            st.session_state.pop("recipe_context", None)
         go("item_filter")
 
     # Demoted stats strip — context beneath the primary paste/action.

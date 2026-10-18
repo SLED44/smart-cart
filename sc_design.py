@@ -86,6 +86,41 @@ def match_badge(match_type: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Recipe context — "what the recipe actually said", shown on the review card
+# so the shopper can judge a substitute. One block per recipe: bold title,
+# then the recipe's own line(s) quoted beneath. Same layout for 1 or N.
+# ---------------------------------------------------------------------------
+
+def recipe_context_card(entries: list[dict]) -> str:
+    """entries: [{"recipe": str, "lines": [str, ...]}, ...] from
+    mealplan.grocery.recipe_context(). Returns "" when there's nothing to show."""
+    import html as _html
+    blocks = []
+    for e in entries or []:
+        lines = "".join(
+            f'<div style="margin:2px 0 0 10px; padding-left:8px; '
+            f'border-left:2px solid {P["green_100"]}; color:{P["fg"]};">'
+            f'&ldquo;{_html.escape(line)}&rdquo;</div>'
+            for line in e.get("lines") or [] if line
+        )
+        blocks.append(
+            f'<div style="margin-top:6px;"><div style="font-weight:600; '
+            f'color:{P["green_900"]};">{_html.escape(e.get("recipe") or "")}</div>'
+            f'{lines}</div>'
+        )
+    if not blocks:
+        return ""
+    return (
+        f'<div style="background:{P["bg_soft"]}; border:1px solid {P["border_soft"]}; '
+        f'border-radius:10px; padding:8px 12px 10px; margin:6px 0 10px; '
+        f'font-size:0.9em; line-height:1.4;">'
+        f'<div style="font-size:0.78em; font-weight:600; letter-spacing:0.04em; '
+        f'text-transform:uppercase; color:{P["fg_muted"]};">From your recipes</div>'
+        f'{"".join(blocks)}</div>'
+    )
+
+
+# ---------------------------------------------------------------------------
 # Reason chips — small pastel pills shown under a recipe title on the
 # propose/swap cards ("🆕 New to your rotation", "Adds Greek to the week").
 # tone: "neutral" (default), "green" (favorite/loved), "amber" (rating).

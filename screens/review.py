@@ -9,7 +9,8 @@ import kroger_auth
 import preference_store
 import product_matcher
 from applog import get_logger
-from sc_design import match_badge, product_card
+from mealplan.grocery import context_key
+from sc_design import match_badge, product_card, recipe_context_card
 
 from screens._shared import go
 
@@ -46,6 +47,12 @@ def render():
 
     st.subheader(item_name)
     st.html(match_badge(current_mt))
+
+    # Meal-plan runs only: the recipe wording behind this item, so a substitute
+    # can be judged against what the dish actually needs.
+    context = (st.session_state.get("recipe_context") or {}).get(context_key(item_name))
+    if context:
+        st.html(recipe_context_card(context))
 
     # Show original requested quantity for butcher/weight items
     item_notes = item.get("notes", "")
