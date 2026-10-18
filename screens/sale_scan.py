@@ -50,6 +50,7 @@ def render():
                         "brand":        sale_prod.get("brand", ""),
                         "size":         sale_prod.get("size", ""),
                         "price":        sale_price,
+                        "category":     sale_prod.get("category", ""),
                     },
                     source="manual",
                 )
