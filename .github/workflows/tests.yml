@@ -28,3 +28,6 @@ jobs:
 
       - name: Run quantity-math tests
         run: python3 product_matcher.py --test
+
+      - name: Run sale-scanner tests
+        run: python3 sale_scanner.py --test

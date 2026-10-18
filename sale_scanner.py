@@ -11,7 +11,8 @@ this module queries the Kroger Products API to find comparable products
 that are currently on sale at the household's store.
 
 Comparable is defined as (PRD PM-04):
-    - Same Kroger product category as the preferred item
+    - Same Kroger department as the preferred item (see _same_department —
+      skipped when the preference has no real department on file)
     - Size within 20% of the preferred item's size (where size is parseable)
 
 Public interface:
@@ -68,6 +69,11 @@ SCAN_WORKERS = 5
 
 # Minimum savings to surface an alert (avoid flagging $0.01 differences)
 MIN_SAVINGS_THRESHOLD = 0.25
+
+# Kroger "categories" that are cross-aisle labels, not departments. A
+# preference saved under one of these can't say which aisle it lives in, so
+# the department check is skipped for it (user's call, 2026-10-18).
+_CROSS_DEPT_LABELS = {"natural & organic", "international"}
 
 # ---------------------------------------------------------------------------
 # Size parsing
@@ -161,6 +167,25 @@ def _sizes_are_comparable(size_a: str, size_b: str, tolerance: float = SIZE_TOLE
 
     ratio = abs(oz_a - oz_b) / oz_a
     return ratio <= tolerance
+
+
+def _same_department(preferred_category: str, raw_product: dict) -> bool:
+    """
+    True if the sale candidate is in the preferred item's Kroger department.
+
+    The search is by item name, so "blueberries" also returns blueberry
+    yogurt — similar size, on sale, and useless. Preferences store Kroger's
+    own category (categories[0] at save time), so compare like with like
+    against any of the candidate's categories.
+
+    Returns True (benefit of the doubt) when the preference has no category
+    or only a cross-aisle label like "Natural & Organic".
+    """
+    pref = (preferred_category or "").strip().lower()
+    if not pref or pref in _CROSS_DEPT_LABELS:
+        return True
+    cats = {(c or "").strip().lower() for c in raw_product.get("categories", [])}
+    return pref in cats
 
 
 # ---------------------------------------------------------------------------
@@ -305,6 +330,7 @@ def _scan_single_item(
     preferred_price = preferred_product.get("price")
     preferred_size  = preferred_product.get("size", "")
     preferred_upc   = preferred_product.get("kroger_upc", "")
+    preferred_cat   = preferred_product.get("category", "")
 
     # Search by item name in the same category
     raw_products = _search_products_for_scan(item_name, location_id, token)
@@ -315,6 +341,10 @@ def _scan_single_item(
     for raw in raw_products:
         # Skip the preferred product itself
         if raw.get("upc") == preferred_upc:
+            continue
+
+        # Same department only — no flavored yogurt for fresh berries.
+        if not _same_department(preferred_cat, raw):
             continue
 
         regular_price, promo_price = _extract_pricing(raw)
@@ -407,6 +437,7 @@ def scan_for_sale_alternatives(session_items: list) -> dict:
             "brand":        pref.get("brand", ""),
             "size":         pref.get("size", ""),
             "price":        pref.get("price"),
+            "category":     pref.get("category", ""),
         }
         try:
             return _scan_single_item(
@@ -493,8 +524,56 @@ def apply_sale_switches(
 # CLI entry point
 # ---------------------------------------------------------------------------
 
+def _run_self_test() -> None:
+    """Offline checks for the comparability rules — no network, no API key.
+
+    Run with:  python3 sale_scanner.py --test
+    """
+    global _search_products_for_scan
+
+    def raw(upc, name, cats, size, regular, promo):
+        return {"upc": upc, "description": name, "categories": cats,
+                "items": [{"size": size, "price": {"regular": regular, "promo": promo}}]}
+
+    berries = {"kroger_upc": "0003338321000", "product_name": "Fresh Red Raspberries",
+               "size": "6 oz", "price": 3.79, "category": "Produce"}
+    results = [
+        raw("1", "Chobani Raspberry Greek Yogurt", ["Dairy"], "5.3 oz", 1.69, 1.00),
+        raw("2", "Driscoll's Raspberries", ["Produce"], "6 oz", 4.49, 2.99),
+    ]
+    real_search = _search_products_for_scan
+    _search_products_for_scan = lambda *a, **k: results
+    try:
+        # The regression: berries' best "deal" was a flavored yogurt cup.
+        alert = _scan_single_item("raspberries", "raspberries", berries, "loc", "tok")
+        assert alert and alert["sale_product"]["upc"] == "2", alert
+        print("✓ raspberries skip on-sale yogurt, keep on-sale raspberries")
+
+        results[:] = results[:1]
+        assert _scan_single_item("raspberries", "raspberries", berries, "loc", "tok") is None
+        print("✓ yogurt alone yields no alert for raspberries")
+
+        # No real department on file → today's behavior (no filter).
+        for cat in ("", "Natural & Organic", "International"):
+            pref = dict(berries, category=cat)
+            assert _scan_single_item("raspberries", "raspberries", pref, "loc", "tok"), cat
+        print("✓ blank / cross-aisle preference categories skip the check")
+
+        # Case and secondary categories still count as a match.
+        assert _same_department("produce", {"categories": ["Natural & Organic", "Produce"]})
+        print("✓ department match is case-blind and checks every category")
+    finally:
+        _search_products_for_scan = real_search
+    print("✓ All tests passed.")
+
+
 if __name__ == "__main__":
     import sys
+
+    if "--test" in sys.argv:
+        _run_self_test()
+        sys.exit(0)
+
     from list_parser import parse_grocery_list
 
     print("SmartCart — Sale Scanner Test")

@@ -224,6 +224,9 @@ def _hand_off_to_smartcart(plan: dict, items: list[dict] | None = None):
     st.session_state.raw_list = _items_to_text(items)
     _log.info("handoff text -> home:\n%s", st.session_state.raw_list)
     st.session_state.meal_plan_handoff = True
+    # The text above drops which recipe asked for what; keep it on the side so
+    # the review screen can show the recipe's own wording for each item.
+    st.session_state.recipe_context = grocery.recipe_context(recipe_ids)
 
     # Reset any leftover session state from a previous SmartCart run.
     st.session_state.parsed_result = None

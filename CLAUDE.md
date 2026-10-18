@@ -251,6 +251,26 @@ Rough priority order. Pick from the top.
   household÷servings ratio was behind pasta e fagioli's "portions look cut
   down" note (serves 5 → ×0.8). All three scale sites go through `batch_scale`;
   don't reintroduce a ratio inline.
+- **Review cards show the recipe's own wording — best-effort.** The meal-plan
+  hand-off turns ingredients into plain text for list_parser, so recipe
+  provenance is kept on the side: `grocery.recipe_context()` →
+  `session_state.recipe_context` (`context_key` → `[{recipe, lines}]`, lines =
+  verbatim `original_text`). The review screen looks items up by
+  `grocery.context_key(item_name)` (case/plural/word-order/prep-word blind) and
+  renders `sc_design.recipe_context_card`. An item the parser renamed past
+  recognition, or the user edited, just shows no box. Dropped at Sort time when
+  the list didn't come from the meal plan. Auto-confirmed items never show it.
+  Added 2026-10-18.
+- **Sale scan stays in the preferred item's Kroger department.** The scan
+  searches by item name, so "raspberries" returned on-sale flavored yogurt
+  (similar size, cheaper) week after week. `sale_scanner._same_department`
+  now requires the candidate's Kroger `categories` to include the
+  preference's saved `category` (Kroger's own `categories[0]`, stored at save
+  time — not SmartCart's parser category). Skipped (old behavior) when the
+  preference has no category or a cross-aisle label: "Natural & Organic" or
+  "International" — 13 of 69 prefs as of 2026-10-18, left as-is by decision.
+  Sale suggestions are not logged anywhere (not in `run_log`). Tests:
+  `python3 sale_scanner.py --test`. Added 2026-10-18.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners
