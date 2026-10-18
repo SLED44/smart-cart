@@ -238,6 +238,15 @@ Rough priority order. Pick from the top.
   matches ignore the slow-cooker toggle (both shoulder recipes are
   slow-cooker). Tests: `protein_target_tests` in `mealplan/_tests.py`.
 - **Step → ingredient highlighting is tagged by Claude, once per recipe.** The cook pane lights a step's ingredients from `recipe["step_ingredients"]` (`{"fp": ..., "map": {"<step>": [ingredient indices]}}`), written by `mealplan/step_tags.py` the first time a recipe is opened in cooking mode (one Haiku call, spinner). `fp` hashes the ingredient lines + step texts, so editing a recipe re-tags it on the next open. Don't go back to text matching as the primary source: the old last-word substring matcher lit all three sauces on Beef & Broccoli's rice step ("sauce**pan**") and never lit ~30% of ingredients. `keyword_map` (whole-word, plural-tolerant) is only the fallback when Claude is unreachable. Tag the whole library ahead of time with `python3 -m mealplan.step_tags --backfill`; inspect one with `--show <recipe_id>`. Tests: `step_tag_tests` in `mealplan/_tests.py`. Added 2026-10-14.
+- **Cook notes vs. recipe text: check `notes_applied_at`.** "Made it with
+  changes" saves `user_notes` but never edits the recipe. A recipe whose notes
+  have been folded into its ingredients/steps carries `notes_applied_at`; one
+  with `user_notes` and no stamp (or a `last_cooked_at` newer than the stamp)
+  still has pending notes. First pass: `scripts/archive/apply_cook_notes_2026_10_18.py`.
+- **`servings_original` ≠ 4 scales every amount.** The cook pane and grocery
+  list multiply by household size ÷ `servings_original`, so a serves-6 recipe
+  shows ⅔ of a can. That was the "portions look cut down" complaint on pasta
+  e fagioli (serves 5 → ×0.8; now set to 4). Nine active recipes, mostly slow-cooker, are still serves-6.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners
