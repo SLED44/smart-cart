@@ -574,6 +574,16 @@ def recipe_view_tests(t: _T):
         line = format_ingredient_line(cloves, 0.8)
         assert line.strip() == "**3** garlic", line
 
+    @t.case("recipes are cooked in whole batches — never scaled down")
+    def _():
+        from recipe_units import batch_scale
+        assert batch_scale(4, 6) == 1      # serves-6 chili: full batch, leftovers
+        assert batch_scale(4, 5) == 1      # the old ×0.8 pasta e fagioli case
+        assert batch_scale(4, 4) == 1
+        assert batch_scale(4, 2) == 2      # serves-2 pho: doubled
+        assert batch_scale(4, 3) == 2      # never ×1.33 — that splits cans
+        assert batch_scale(4, None) == 1   # missing yield defaults to 4
+
     @t.case("non-discrete units still scale with kitchen fractions")
     def _():
         broth = {"amount": 4, "unit": "cup", "name": "chicken broth",

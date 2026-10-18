@@ -33,3 +33,4 @@ __pycache__/
 .venv/
 venv/
 env/
+recipe_library_backup_*.json

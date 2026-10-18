@@ -70,7 +70,7 @@ def render():
     rules = load_rules()
     household_size = int(((rules.get("household") or {}).get("size")) or 4)
     original_servings = int(recipe.get("servings_original") or 4) or 4
-    scale = household_size / original_servings
+    scale = _recipe_view.compute_scale(recipe, rules)
 
     # Flash messages (after Made it / Made changes / Never again, before nav)
     flash = st.session_state.pop(_FLASH_KEY, None)
@@ -78,7 +78,7 @@ def render():
         st.success(flash)
 
     _render_top_bar()
-    _render_hero(recipe, household_size, original_servings)
+    _render_hero(recipe, household_size, original_servings, scale)
     _render_notes_callout(recipe)
     _render_cook_body(rid, recipe, scale)
     st.divider()
@@ -98,15 +98,17 @@ def _render_top_bar():
             _go_back()
 
 
-def _render_hero(recipe: dict, household_size: int, original_servings: int):
+def _render_hero(recipe: dict, household_size: int, original_servings: int, scale: int):
     # The title / art tile / cuisine pill / meta chips now live inside the
     # cooking-pane iframe (so the two columns own the frame and scroll
     # independently). Here we keep only the bits the pane header omits:
     # household scaling, how many times it's been cooked, and the source link.
     bits = []
-    if household_size != original_servings:
-        bits.append(f"Scaled to your household of {household_size} "
+    if scale > 1:
+        bits.append(f"×{scale} batch for your household of {household_size} "
                     f"(recipe yields {original_servings})")
+    elif original_servings > household_size:
+        bits.append(f"Full batch — serves {original_servings} (leftovers for a household of {household_size})")
     else:
         bits.append(f"Serves {household_size}")
     if recipe.get("times_cooked"):

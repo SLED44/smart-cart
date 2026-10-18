@@ -45,10 +45,9 @@ def render_thumb(recipe: dict, size: int = 140):
 # ---------------------------------------------------------------------------
 
 def compute_scale(recipe: dict, rules: dict) -> float:
-    """Household size / recipe's original yield (defaults to 1.0)."""
+    """Whole batches for the household — see ``recipe_units.batch_scale``."""
     household = int(((rules.get("household") or {}).get("size")) or 4) or 4
-    original = int(recipe.get("servings_original") or 4) or 4
-    return household / original
+    return batch_scale(household, recipe.get("servings_original"))
 
 
 def cut_amount_note(recipe: dict, cut: str, protein_req: dict | None, rules: dict) -> str:
@@ -82,6 +81,7 @@ def fmt_amount(q: float) -> str:
 # live in recipe_units so the grocery aggregator can reuse the exact same rules
 # (one source of truth — the shopping list can't disagree with the cook screen).
 from recipe_units import (  # noqa: E402
+    batch_scale,
     _DISCRETE_UNITS, _WHOLE_ITEMS, _WHOLE_RE, _is_whole_item,
     _round_step, _round_to, format_minutes,
 )

@@ -29,7 +29,7 @@ V1 scope decisions (per PRD §12.4):
 import re
 
 from preference_store import normalise_item_key, get_preference
-from recipe_units import round_quantity
+from recipe_units import batch_scale, round_quantity
 from mealplan import library as _library
 
 
@@ -175,8 +175,7 @@ def aggregate_grocery_list(
         recipe = lib.get(rid) if hasattr(lib, "get") else lib.get_all().get(rid)
         if not recipe:
             continue
-        original_servings = int(recipe.get("servings_original") or 4) or 4
-        scale = household_size / original_servings
+        scale = batch_scale(household_size, recipe.get("servings_original"))
         recipe_title = recipe.get("title", rid)
         for ing in (recipe.get("ingredients") or []):
             # Spoonacular emits unit="servings" for amountless rows: to-taste

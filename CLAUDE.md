@@ -243,10 +243,14 @@ Rough priority order. Pick from the top.
   have been folded into its ingredients/steps carries `notes_applied_at`; one
   with `user_notes` and no stamp (or a `last_cooked_at` newer than the stamp)
   still has pending notes. First pass: `scripts/archive/apply_cook_notes_2026_10_18.py`.
-- **`servings_original` ≠ 4 scales every amount.** The cook pane and grocery
-  list multiply by household size ÷ `servings_original`, so a serves-6 recipe
-  shows ⅔ of a can. That was the "portions look cut down" complaint on pasta
-  e fagioli (serves 5 → ×0.8; now set to 4). Nine active recipes, mostly slow-cooker, are still serves-6.
+- **Recipes cook in whole batches — never scaled down.** The cook pane and
+  grocery list multiply by `recipe_units.batch_scale(household, servings_original)`
+  = `max(1, ceil(household / servings))`. A serves-6 chili is made as a full
+  batch (leftovers) instead of ⅔ of one, and a serves-2/3 recipe doubles —
+  so no multiplier ever splits a can (user's call, 2026-10-18). The old
+  household÷servings ratio was behind pasta e fagioli's "portions look cut
+  down" note (serves 5 → ×0.8). All three scale sites go through `batch_scale`;
+  don't reintroduce a ratio inline.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
 
 ## Useful one-liners

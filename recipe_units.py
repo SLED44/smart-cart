@@ -12,6 +12,7 @@ Streamlit import — lets grocery.py reuse them without pulling in the UI stack.
 
 Public surface:
     format_minutes(minutes, short)      total time as "8 hr 20 min" / "8h 20m"
+    batch_scale(household, servings)    whole-batch multiplier (never < 1)
     _DISCRETE_UNITS                     set of whole-purchase units
     _round_step(unit)   -> float        display granularity for a unit
     _round_to(value, step) -> float     half-up rounding to a step
@@ -90,6 +91,18 @@ def _is_whole_item(name: str, unit: str) -> bool:
     if unit.lower() not in ("", "count"):
         return False
     return bool(_WHOLE_RE.search(name or ""))
+
+
+def batch_scale(household_size: int, servings_original) -> int:
+    """How many whole batches of a recipe to cook for the household.
+
+    Never scales down: a serves-6 chili for a family of 4 is made as a full
+    batch (leftovers) rather than ⅔ of one, which put "⅔ can" on the cook
+    screen and partial cans on the grocery list. Scales up in whole batches
+    only (serves-2 → ×2, serves-3 → ×2), so a multiplier never splits a can.
+    """
+    servings = int(servings_original or 4) or 4
+    return max(1, math.ceil(int(household_size or 4) / servings))
 
 
 def format_minutes(minutes, short: bool = False) -> str:

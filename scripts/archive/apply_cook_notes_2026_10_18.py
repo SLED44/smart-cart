@@ -73,7 +73,7 @@ def wings(r):
         "Toss with the remaining sauce and scatter with cilantro.",
         "Air-fry the fries before the wings (they re-crisp in 2 minutes at the end) and serve everything with carrot and celery sticks.",
     )
-    r["equipment"] = ["air_fryer", "saucepan"]
+    r["equipment"] = ["air_fryer", "sauce_pan"]
     r["prep_minutes"], r["cook_minutes"], r["ready_in_minutes"] = 15, 35, 50
 
 
