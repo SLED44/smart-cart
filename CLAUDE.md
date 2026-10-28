@@ -242,7 +242,8 @@ Rough priority order. Pick from the top.
   changes" saves `user_notes` but never edits the recipe. A recipe whose notes
   have been folded into its ingredients/steps carries `notes_applied_at`; one
   with `user_notes` and no stamp (or a `last_cooked_at` newer than the stamp)
-  still has pending notes. First pass: `scripts/archive/apply_cook_notes_2026_10_18.py`.
+  still has pending notes. Passes: `scripts/archive/apply_cook_notes_2026_10_18.py`,
+  `..._2026_10_27.py` (naan with every Indian curry).
 - **Recipes cook in whole batches — never scaled down.** The cook pane and
   grocery list multiply by `recipe_units.batch_scale(household, servings_original)`
   = `max(1, ceil(household / servings))`. A serves-6 chili is made as a full
