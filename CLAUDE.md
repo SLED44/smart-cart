@@ -153,6 +153,7 @@ Rough priority order. Pick from the top.
 8. **Repeat last order** — one-click button on home: pulls last `session_log` entry's items and pre-populates the textarea or jumps straight to review.
 9. **Staple drag-to-reorder** — `reorder_staples()` exists; UI doesn't.
 10. **Cache Kroger search results in-session** — same list twice in a row currently re-queries everything. Use `@st.cache_data(ttl=300)` on `_search_kroger_products`.
+10a. **Make the sauce setting do something** — `household.buy_dont_make_sauces` ("Prefer store-bought sauces / dressings") is saved by `screens/mealplan_rules.py` but no code reads it. Replace the true/false with the real rule (make easy sauces, buy fiddly ones and salad dressings — see Known quirks) and feed it into wherever Claude writes or adapts recipes.
 
 ### Medium
 11. **Pantry inventory** — third KV bucket. Item filter screen prefilters items already on hand.
@@ -272,6 +273,14 @@ Rough priority order. Pick from the top.
   Sale suggestions are not logged anywhere (not in `run_log`). Tests:
   `python3 sale_scanner.py --test`. Added 2026-10-18.
 - **Green onions/scallions are a bunch, not a count.** The parser prompt and `mealplan_active._COUNT_PORTION` both collapse "4 scallions" to 1 bunch; only an explicit "N bunches" buys more.
+- **Household sauce rule: make the easy ones, buy the fiddly ones.** When writing
+  or editing a recipe, make a sauce from scratch if it's quick and uses pantry
+  staples (whisk-and-go, no cooking down). Buy anything that's a pain to make
+  (teriyaki and similar) and salad dressings in general — slaw dressing was
+  the exception the user chose to make (2026-10-28, honey-Dijon cider dressing
+  in `gen_pork_tenderloin_slaw`). When unsure, ask. The meal-plan rules
+  checkbox `household.buy_dont_make_sauces` does **not** enforce this — nothing
+  reads it (see backlog 10a).
 
 ## Useful one-liners
 
